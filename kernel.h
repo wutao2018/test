@@ -5,7 +5,7 @@ __global__ void gemm(int M[], int N[], int K[], float *A[], float *B[], float *C
 template<>
 __global__ void gemm<128>(int M[], int N[], int K[], float *A[], float *B[], float *C[]){
 	
-	// int i = blockIdx.z;
+	int ii = blockIdx.z;
 	extern __shared__ float sh[]; // 用作什么 kernel第三个参数分配的吗
 	// int t = T_strategy[i];
 
@@ -21,22 +21,22 @@ __global__ void gemm<128>(int M[], int N[], int K[], float *A[], float *B[], flo
 	int block_base_y = blockIdx.x*32;
 
 	//Load C from global memory to register file
-	float4 *C_start = (float4*) (C + block_base_x*M + block_base_y + (threadIdx.x%8)*4 + (threadIdx.x/8)*M);
+	float4 *C_start = (float4*) (C[ii] + block_base_x*M[ii] + block_base_y + (threadIdx.x%8)*4 + (threadIdx.x/8)*M[ii]);
 
 	reg_C[0] = *C_start;
-	reg_C[1] = *(C_start + 4*M);
+	reg_C[1] = *(C_start + 4*M[ii]);
 
 	//load A from global memory to shared memory
-	float2 *A_start = (float2*) (A + block_base_y + (threadIdx.x%16)*2 + (threadIdx.x/16)*M);
+	float2 *A_start = (float2*) (A[ii] + block_base_y + (threadIdx.x%16)*2 + (threadIdx.x/16)*M[ii]);
 	*((float2*)(sh_A + 2*threadIdx.x)) = *(A_start);
 
 	//load B from global memory to shared memory
-	float2 *B_start = (float2*) (B + K*block_base_x + (threadIdx.x/32)*2 + (threadIdx.x%32)*K);
+	float2 *B_start = (float2*) (B[ii] + K[ii]*block_base_x + (threadIdx.x/32)*2 + (threadIdx.x%32)*K[ii]);
 	*((float2*)(sh_B + 2*threadIdx.x)) = *(B_start);
 
 	int double_buffer = 0;
 #pragma unroll
-	for(int k=0; k<K; k+=8)
+	for(int k=0; k<K[ii]; k+=8)
 	{
 		__syncthreads();
 		int A_offset = double_buffer + (threadIdx.x%8)*4;
@@ -68,9 +68,9 @@ __global__ void gemm<128>(int M[], int N[], int K[], float *A[], float *B[], flo
 
 		double_buffer ^= 256;
 
-		if (k+8 < K)
+		if (k+8 < K[ii])
 		{
-			A_start += 4*M; 
+			A_start += 4*M[ii]; 
 			*((float2*)(sh_A + double_buffer + 2*threadIdx.x)) = *(A_start);
 			B_start += 4; 
 			*((float2*)(sh_B + double_buffer + 2*threadIdx.x)) = *(B_start);
@@ -78,7 +78,7 @@ __global__ void gemm<128>(int M[], int N[], int K[], float *A[], float *B[], flo
 	}
 	
     *C_start = reg_C[0];
-    *(C_start + 4*M) = reg_C[1];
+    *(C_start + 4*M[ii]) = reg_C[1];
 
 	return;
 }
