@@ -136,7 +136,7 @@ __device__ void gemm_256_32x32_nrb(int M, int N, int K, float *A, float *B, floa
 	int block_base_y = blockIdx.x*32;
 
 	//Load C from global memory to register file
-	float4 *C_start = (float4 *) (C + block_base_x*M + block_base_y + (threadIdx.x%8)*4 + (threadIdx.x/8)*M);
+	float *C_start = (C + block_base_x*M + block_base_y + (threadIdx.x%8)*4 + (threadIdx.x/8)*M); //(float4 *) 
 
     //reg_C = *C_start;
 
@@ -162,10 +162,10 @@ __device__ void gemm_256_32x32_nrb(int M, int N, int K, float *A, float *B, floa
 			//reg_A = *((float4*) (sh_A + A_offset)); 
 			//reg_B = sh_B[B_offset]; 
 
-			*(C_start) = fma(*(sh_A + A_offset), sh_B[B_offset], reg_C.x);
-			*(C_start + 1) = fma(*(sh_A + A_offset + 1), sh_B[B_offset], reg_C.y);
-			*(C_start + 2) = fma(*(sh_A + A_offset + 2), sh_B[B_offset], reg_C.z);
-			*(C_start + 3) = fma(*(sh_A + A_offset + 3), sh_B[B_offset], reg_C.w);
+			*(C_start) = fma(*(sh_A + A_offset), sh_B[B_offset], *(C_start));
+			*(C_start + 1) = fma(*(sh_A + A_offset + 1), sh_B[B_offset], *(C_start + 1));
+			*(C_start + 2) = fma(*(sh_A + A_offset + 2), sh_B[B_offset], *(C_start + 2));
+			*(C_start + 3) = fma(*(sh_A + A_offset + 3), sh_B[B_offset], *(C_start + 3));
 
 			A_offset += 32;
 			B_offset += 32;
