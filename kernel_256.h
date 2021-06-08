@@ -62,12 +62,12 @@ __device__ void gemm_256_16x16_w(int M, int N, int K, float *A, float *B, float 
 	float *sh_B = sh + 2*16*16;
 
 	float reg_C;
-	float reg_A;
-	float reg_B;
+	float reg_A, reg_A2;
+	float reg_B, reg_B2;
 
 	// Compute block's starting coordinate
-	int block_base_x = blockIdx.y*16;
-	int block_base_y = blockIdx.x*16;
+	int block_base_x = blockIdx.y << 4;
+	int block_base_y = blockIdx.x << 4;
 
 	//Load C from global memory to register file
 	float *C_start = (C + block_base_x*M + block_base_y + (threadIdx.x%16) + (threadIdx.x/16)*M);
@@ -87,35 +87,108 @@ __device__ void gemm_256_16x16_w(int M, int N, int K, float *A, float *B, float 
 	for(int k=0; k<K; k+=16)
 	{
 		__syncthreads();
-		int A_offset = double_buffer + (threadIdx.x%16);
-		int B_offset = double_buffer + (threadIdx.x/16);
+		int A_offset = double_buffer + (threadIdx.x & 15);  // threadIdx.x%16
+		int B_offset = double_buffer + (threadIdx.x >> 4);  // threadIdx.x/16
 		
+#pragma unroll
+		for (int i=0; i<8; i += 2)   // loop更大，有更多优化空间？
+		{
+			reg_A = sh_A[A_offset];  // 2个一起加载：需要解决后面的加16的问题
+			reg_B = sh_B[B_offset];  // 共享内存访问 一个warp只访问0和1两个元素
+			
+			reg_C = fma(reg_A, reg_B, reg_C);  // 周期数
+			
+			A_offset += 16;
+			B_offset += 16;
+			
+			reg_A2 = sh_A[A_offset];           // 可以用prefetch吗
+			reg_B2 = sh_B[B_offset];
+			
+			reg_C = fma(reg_A2, reg_B2, reg_C);   // reg_C依赖
+		}
+
 		double_buffer ^= 256;
 
 		if (k+16 < K)
 		{
-			A_start += 16*M; 
+			A_start += M << 4;   // 16*M
 			* (sh_A + double_buffer + threadIdx.x) = *(A_start);
 
 			B_start += 16; 
 			* (sh_B + double_buffer + threadIdx.x) = *(B_start);
 		}
-			
-#pragma unroll
-		for (int i=0; i<16; ++i)	{
-			reg_A = sh_A[A_offset]; 
-			reg_B = sh_B[B_offset]; 
-			reg_C = fma(reg_A, reg_B, reg_C);
-
-			A_offset += 16;
-			B_offset += 16;
-		}				
 	}
 	
 	*(C_start) = reg_C;
 }
 
-__device__ void gemm_256_32x32(int M, int N, int K, float *A, float *B, float *C, float *sh){
+__device__ void gemm_256_32x32_nrb(int M, int N, int K, float *A, float *B, float *C, float *sh){
+
+	float *sh_A = sh;
+	float *sh_B = sh + 2*32*8;
+
+	//float4 reg_C;
+	//float4 reg_A;
+	//float  reg_B;
+
+	// Compute block's starting coordinate
+	int block_base_x = blockIdx.y*32;
+	int block_base_y = blockIdx.x*32;
+
+	//Load C from global memory to register file
+	float4 *C_start = (float4 *) (C + block_base_x*M + block_base_y + (threadIdx.x%8)*4 + (threadIdx.x/8)*M);
+
+    //reg_C = *C_start;
+
+	//load B from global memory to shared memory
+	float *A_start = (A + block_base_y + (threadIdx.x%32) + (threadIdx.x/32)*M); 
+	* (sh_A + threadIdx.x) = *(A_start);
+
+	//load A from global memory to shared memory
+	float *B_start = (B + K*block_base_x + (threadIdx.x/32) + (threadIdx.x%32)*K); 
+	* (sh_B + threadIdx.x) = *(B_start);
+
+	int double_buffer = 0;
+#pragma unroll
+	for(int k=0; k<K; k+=8){
+
+		__syncthreads();
+		int A_offset = double_buffer + (threadIdx.x%8)*4;
+		int B_offset = double_buffer + (threadIdx.x/8);
+			
+#pragma unroll
+		for (int i=0; i<8; ++i)	
+		{
+			//reg_A = *((float4*) (sh_A + A_offset)); 
+			//reg_B = sh_B[B_offset]; 
+
+			*(C_start) = fma(*(sh_A + A_offset), sh_B[B_offset], reg_C.x);
+			*(C_start + 1) = fma(*(sh_A + A_offset + 1), sh_B[B_offset], reg_C.y);
+			*(C_start + 2) = fma(*(sh_A + A_offset + 2), sh_B[B_offset], reg_C.z);
+			*(C_start + 3) = fma(*(sh_A + A_offset + 3), sh_B[B_offset], reg_C.w);
+
+			A_offset += 32;
+			B_offset += 32;
+		}
+		
+		double_buffer ^= 256;
+
+		if (k+8 < K)
+		{
+			A_start += 8*M; 
+			* (sh_A + double_buffer + threadIdx.x) = *(A_start);
+
+			B_start += 8; 
+			* (sh_B + double_buffer + threadIdx.x) = *(B_start);
+		}
+				
+	}
+	
+	//*(C_start) = reg_C;
+
+}
+
+__device__ void gemm_256_32x32_mdb(int M, int N, int K, float *A, float *B, float *C, float *sh){
 
 	float *sh_A = sh;
 	float *sh_B = sh + 2*32*8;
@@ -148,6 +221,73 @@ __device__ void gemm_256_32x32(int M, int N, int K, float *A, float *B, float *C
 		__syncthreads();
 		int A_offset = double_buffer + (threadIdx.x%8)*4;
 		int B_offset = double_buffer + (threadIdx.x/8);
+		
+		double_buffer ^= 256;
+
+		if (k+8 < K){
+			A_start += 8*M; 
+			* (sh_A + double_buffer + threadIdx.x) = *(A_start);
+
+			B_start += 8; 
+			* (sh_B + double_buffer + threadIdx.x) = *(B_start);
+		}
+		
+// 是不是跟pragma unroll相关		
+#pragma unroll
+		for (int i=0; i<8; ++i)	{
+			reg_A = *((float4*) (sh_A + A_offset)); 
+			reg_B = sh_B[B_offset]; 
+
+			reg_C.x = fma(reg_A.x, reg_B, reg_C.x);
+			reg_C.y = fma(reg_A.y, reg_B, reg_C.y);
+			reg_C.z = fma(reg_A.z, reg_B, reg_C.z);
+			reg_C.w = fma(reg_A.w, reg_B, reg_C.w);
+
+			A_offset += 32;
+			B_offset += 32;
+		}				
+	}
+	*(C_start) = reg_C;
+
+}
+
+__device__ void gemm_256_32x32(int M, int N, int K, float *A, float *B, float *C, float *sh){
+
+	float *sh_A = sh;
+	float *sh_B = sh + 1<<9;  // 2*32*8
+
+	float4 reg_C;
+	float4 reg_A;
+	float  reg_B;
+	int im8 = threadIdx.x & 7;
+	int id8 = threadIdx.x >> 3;
+	int im32 = threadIdx.x & 31;
+	int id32 = threadIdx.x >> 5;
+
+	// Compute block's starting coordinate
+	int block_base_x = blockIdx.y << 5;
+	int block_base_y = blockIdx.x << 5;
+
+	//Load C from global memory to register file
+	float4 *C_start = (float4 *) (C + block_base_x*M + block_base_y + (im8<<2) + (id8)*M);
+
+    reg_C = *C_start;
+
+	//load B from global memory to shared memory
+	float *A_start = (A + block_base_y + (im32) + (id32)*M); 
+	* (sh_A + threadIdx.x) = *(A_start);
+
+	//load A from global memory to shared memory
+	float *B_start = (B + K*block_base_x + (id32) + (im32)*K); 
+	* (sh_B + threadIdx.x) = *(B_start);
+
+	int double_buffer = 0;
+#pragma unroll
+	for(int k=0; k<K; k+=8){
+
+		__syncthreads();
+		int A_offset = double_buffer + (im8 << 2);
+		int B_offset = double_buffer + id8;
 			
 #pragma unroll
 		for (int i=0; i<8; ++i)	{
@@ -166,7 +306,7 @@ __device__ void gemm_256_32x32(int M, int N, int K, float *A, float *B, float *C
 		double_buffer ^= 256;
 
 		if (k+8 < K){
-			A_start += 8*M; 
+			A_start += M << 3; 
 			* (sh_A + double_buffer + threadIdx.x) = *(A_start);
 
 			B_start += 8; 
