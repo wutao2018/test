@@ -1,0 +1,319 @@
+Time for cuDNN implementation is 8.595837
+grid_size.x = 49, grid_size.y = 8 
+M = 784, N1 = 64, N2 = 96, N3 = 16, N4 = 32, K = 192, P = 28, Q = 28 
+grid_size.x = 49, grid_size.y = 12 
+M = 784, N1 = 128, N2 = 128, N3 = 32, N4 = 64, K = 256, P = 28, Q = 28 
+grid_size.x = 13, grid_size.y = 13 
+M = 196, N1 = 192, N2 = 96, N3 = 16, N4 = 64, K = 480, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 14 
+M = 196, N1 = 160, N2 = 112, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 16 
+M = 196, N1 = 128, N2 = 128, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 18 
+M = 196, N1 = 112, N2 = 144, N3 = 32, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 20 
+M = 196, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 528, P = 14, Q = 14 
+grid_size.x = 4, grid_size.y = 20 
+M = 49, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 4, grid_size.y = 24 
+M = 49, N1 = 384, N2 = 192, N3 = 48, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 49, grid_size.y = 8 
+M = 784, N1 = 64, N2 = 96, N3 = 16, N4 = 32, K = 192, P = 28, Q = 28 
+grid_size.x = 49, grid_size.y = 12 
+M = 784, N1 = 128, N2 = 128, N3 = 32, N4 = 64, K = 256, P = 28, Q = 28 
+grid_size.x = 13, grid_size.y = 13 
+M = 196, N1 = 192, N2 = 96, N3 = 16, N4 = 64, K = 480, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 14 
+M = 196, N1 = 160, N2 = 112, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 16 
+M = 196, N1 = 128, N2 = 128, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 18 
+M = 196, N1 = 112, N2 = 144, N3 = 32, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 20 
+M = 196, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 528, P = 14, Q = 14 
+grid_size.x = 4, grid_size.y = 20 
+M = 49, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 4, grid_size.y = 24 
+M = 49, N1 = 384, N2 = 192, N3 = 48, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 49, grid_size.y = 8 
+M = 784, N1 = 64, N2 = 96, N3 = 16, N4 = 32, K = 192, P = 28, Q = 28 
+grid_size.x = 49, grid_size.y = 12 
+M = 784, N1 = 128, N2 = 128, N3 = 32, N4 = 64, K = 256, P = 28, Q = 28 
+grid_size.x = 13, grid_size.y = 13 
+M = 196, N1 = 192, N2 = 96, N3 = 16, N4 = 64, K = 480, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 14 
+M = 196, N1 = 160, N2 = 112, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 16 
+M = 196, N1 = 128, N2 = 128, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 18 
+M = 196, N1 = 112, N2 = 144, N3 = 32, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 20 
+M = 196, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 528, P = 14, Q = 14 
+grid_size.x = 4, grid_size.y = 20 
+M = 49, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 4, grid_size.y = 24 
+M = 49, N1 = 384, N2 = 192, N3 = 48, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 49, grid_size.y = 8 
+M = 784, N1 = 64, N2 = 96, N3 = 16, N4 = 32, K = 192, P = 28, Q = 28 
+grid_size.x = 49, grid_size.y = 12 
+M = 784, N1 = 128, N2 = 128, N3 = 32, N4 = 64, K = 256, P = 28, Q = 28 
+grid_size.x = 13, grid_size.y = 13 
+M = 196, N1 = 192, N2 = 96, N3 = 16, N4 = 64, K = 480, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 14 
+M = 196, N1 = 160, N2 = 112, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 16 
+M = 196, N1 = 128, N2 = 128, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 18 
+M = 196, N1 = 112, N2 = 144, N3 = 32, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 20 
+M = 196, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 528, P = 14, Q = 14 
+grid_size.x = 4, grid_size.y = 20 
+M = 49, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 4, grid_size.y = 24 
+M = 49, N1 = 384, N2 = 192, N3 = 48, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 49, grid_size.y = 8 
+M = 784, N1 = 64, N2 = 96, N3 = 16, N4 = 32, K = 192, P = 28, Q = 28 
+grid_size.x = 49, grid_size.y = 12 
+M = 784, N1 = 128, N2 = 128, N3 = 32, N4 = 64, K = 256, P = 28, Q = 28 
+grid_size.x = 13, grid_size.y = 13 
+M = 196, N1 = 192, N2 = 96, N3 = 16, N4 = 64, K = 480, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 14 
+M = 196, N1 = 160, N2 = 112, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 16 
+M = 196, N1 = 128, N2 = 128, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 18 
+M = 196, N1 = 112, N2 = 144, N3 = 32, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 20 
+M = 196, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 528, P = 14, Q = 14 
+grid_size.x = 4, grid_size.y = 20 
+M = 49, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 4, grid_size.y = 24 
+M = 49, N1 = 384, N2 = 192, N3 = 48, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 49, grid_size.y = 8 
+M = 784, N1 = 64, N2 = 96, N3 = 16, N4 = 32, K = 192, P = 28, Q = 28 
+grid_size.x = 49, grid_size.y = 12 
+M = 784, N1 = 128, N2 = 128, N3 = 32, N4 = 64, K = 256, P = 28, Q = 28 
+grid_size.x = 13, grid_size.y = 13 
+M = 196, N1 = 192, N2 = 96, N3 = 16, N4 = 64, K = 480, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 14 
+M = 196, N1 = 160, N2 = 112, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 16 
+M = 196, N1 = 128, N2 = 128, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 18 
+M = 196, N1 = 112, N2 = 144, N3 = 32, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 20 
+M = 196, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 528, P = 14, Q = 14 
+grid_size.x = 4, grid_size.y = 20 
+M = 49, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 4, grid_size.y = 24 
+M = 49, N1 = 384, N2 = 192, N3 = 48, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 49, grid_size.y = 8 
+M = 784, N1 = 64, N2 = 96, N3 = 16, N4 = 32, K = 192, P = 28, Q = 28 
+grid_size.x = 49, grid_size.y = 12 
+M = 784, N1 = 128, N2 = 128, N3 = 32, N4 = 64, K = 256, P = 28, Q = 28 
+grid_size.x = 13, grid_size.y = 13 
+M = 196, N1 = 192, N2 = 96, N3 = 16, N4 = 64, K = 480, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 14 
+M = 196, N1 = 160, N2 = 112, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 16 
+M = 196, N1 = 128, N2 = 128, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 18 
+M = 196, N1 = 112, N2 = 144, N3 = 32, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 20 
+M = 196, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 528, P = 14, Q = 14 
+grid_size.x = 4, grid_size.y = 20 
+M = 49, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 4, grid_size.y = 24 
+M = 49, N1 = 384, N2 = 192, N3 = 48, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 49, grid_size.y = 8 
+M = 784, N1 = 64, N2 = 96, N3 = 16, N4 = 32, K = 192, P = 28, Q = 28 
+grid_size.x = 49, grid_size.y = 12 
+M = 784, N1 = 128, N2 = 128, N3 = 32, N4 = 64, K = 256, P = 28, Q = 28 
+grid_size.x = 13, grid_size.y = 13 
+M = 196, N1 = 192, N2 = 96, N3 = 16, N4 = 64, K = 480, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 14 
+M = 196, N1 = 160, N2 = 112, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 16 
+M = 196, N1 = 128, N2 = 128, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 18 
+M = 196, N1 = 112, N2 = 144, N3 = 32, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 20 
+M = 196, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 528, P = 14, Q = 14 
+grid_size.x = 4, grid_size.y = 20 
+M = 49, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 4, grid_size.y = 24 
+M = 49, N1 = 384, N2 = 192, N3 = 48, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 49, grid_size.y = 8 
+M = 784, N1 = 64, N2 = 96, N3 = 16, N4 = 32, K = 192, P = 28, Q = 28 
+grid_size.x = 49, grid_size.y = 12 
+M = 784, N1 = 128, N2 = 128, N3 = 32, N4 = 64, K = 256, P = 28, Q = 28 
+grid_size.x = 13, grid_size.y = 13 
+M = 196, N1 = 192, N2 = 96, N3 = 16, N4 = 64, K = 480, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 14 
+M = 196, N1 = 160, N2 = 112, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 16 
+M = 196, N1 = 128, N2 = 128, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 18 
+M = 196, N1 = 112, N2 = 144, N3 = 32, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 20 
+M = 196, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 528, P = 14, Q = 14 
+grid_size.x = 4, grid_size.y = 20 
+M = 49, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 4, grid_size.y = 24 
+M = 49, N1 = 384, N2 = 192, N3 = 48, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 49, grid_size.y = 8 
+M = 784, N1 = 64, N2 = 96, N3 = 16, N4 = 32, K = 192, P = 28, Q = 28 
+grid_size.x = 49, grid_size.y = 12 
+M = 784, N1 = 128, N2 = 128, N3 = 32, N4 = 64, K = 256, P = 28, Q = 28 
+grid_size.x = 13, grid_size.y = 13 
+M = 196, N1 = 192, N2 = 96, N3 = 16, N4 = 64, K = 480, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 14 
+M = 196, N1 = 160, N2 = 112, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 16 
+M = 196, N1 = 128, N2 = 128, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 18 
+M = 196, N1 = 112, N2 = 144, N3 = 32, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 20 
+M = 196, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 528, P = 14, Q = 14 
+grid_size.x = 4, grid_size.y = 20 
+M = 49, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 4, grid_size.y = 24 
+M = 49, N1 = 384, N2 = 192, N3 = 48, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 49, grid_size.y = 8 
+M = 784, N1 = 64, N2 = 96, N3 = 16, N4 = 32, K = 192, P = 28, Q = 28 
+grid_size.x = 49, grid_size.y = 12 
+M = 784, N1 = 128, N2 = 128, N3 = 32, N4 = 64, K = 256, P = 28, Q = 28 
+grid_size.x = 13, grid_size.y = 13 
+M = 196, N1 = 192, N2 = 96, N3 = 16, N4 = 64, K = 480, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 14 
+M = 196, N1 = 160, N2 = 112, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 16 
+M = 196, N1 = 128, N2 = 128, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 18 
+M = 196, N1 = 112, N2 = 144, N3 = 32, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 20 
+M = 196, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 528, P = 14, Q = 14 
+grid_size.x = 4, grid_size.y = 20 
+M = 49, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 4, grid_size.y = 24 
+M = 49, N1 = 384, N2 = 192, N3 = 48, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 49, grid_size.y = 8 
+M = 784, N1 = 64, N2 = 96, N3 = 16, N4 = 32, K = 192, P = 28, Q = 28 
+grid_size.x = 49, grid_size.y = 12 
+M = 784, N1 = 128, N2 = 128, N3 = 32, N4 = 64, K = 256, P = 28, Q = 28 
+grid_size.x = 13, grid_size.y = 13 
+M = 196, N1 = 192, N2 = 96, N3 = 16, N4 = 64, K = 480, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 14 
+M = 196, N1 = 160, N2 = 112, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 16 
+M = 196, N1 = 128, N2 = 128, N3 = 24, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 18 
+M = 196, N1 = 112, N2 = 144, N3 = 32, N4 = 64, K = 512, P = 14, Q = 14 
+grid_size.x = 13, grid_size.y = 20 
+M = 196, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 528, P = 14, Q = 14 
+grid_size.x = 4, grid_size.y = 20 
+M = 49, N1 = 256, N2 = 160, N3 = 32, N4 = 128, K = 832, P = 7, Q = 7 
+grid_size.x = 4, grid_size.y = 24 
+M = 49, N1 = 384, N2 = 192, N3 = 48, N4 = 128, K = 832, P = 7, Q = 7 
+Time for batched-Conv implementation is 7.979818
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+our = 0.00, cudnn = 0.00 
+result is correctly!
