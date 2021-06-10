@@ -149,13 +149,14 @@ __device__ void gemm_64_16x16_1M(int M, int N, int K, int P, int Q, float *A, fl
 #pragma unroll
         for (int i=0; i<8; i+=2)   // 全部展开有register spill吗
 		{
-            reg_A[0] = sh_A[A_offset];    // A_offset+0 ~ A_offset+3 为什么不用向量呢
+			*((float4*) reg_A) = *((float4*)(sh_A + A_offset));
+            //reg_A[0] = sh_A[A_offset];    // A_offset+0 ~ A_offset+3 为什么不用向量呢
 			reg_B[0] = sh_B[B_offset];
-            reg_A[1] = sh_A[A_offset+1];  // 为了避免bank冲突, 这8个寄存器都不是连续的【4个就不会重复】，因此不能使用向量传输指令
-            reg_A[2] = sh_A[A_offset+2];
-            reg_A[3] = sh_A[A_offset+3];
+            //reg_A[1] = sh_A[A_offset+1];  // 为了避免bank冲突, 这8个寄存器都不是连续的【4个就不会重复】，因此不能使用向量传输指令
+            //reg_A[2] = sh_A[A_offset+2];
+            //reg_A[3] = sh_A[A_offset+3];
 			
-			//*((float4*) reg_A) = (float4*)(sh_A + A_offset);
+			
 			
 			/*
 			ld.shared.f32 	%f21, [%r47+1024];
@@ -178,14 +179,15 @@ __device__ void gemm_64_16x16_1M(int M, int N, int K, int P, int Q, float *A, fl
             reg_C.y = fma(reg_A[1], reg_B[0], reg_C.y);
             reg_C.z = fma(reg_A[2], reg_B[0], reg_C.z);
             reg_C.w = fma(reg_A[3], reg_B[0], reg_C.w);
-			A_offset += 32;
 			
+			
+			*((float4*) (reg_A + 4)) = *((float4*)(sh_A + A_offset + 16));
 			reg_B[1] = sh_B[B_offset+1];
-			reg_A[4] = sh_A[A_offset+16];
-            reg_A[5] = sh_A[A_offset+17];
-            reg_A[6] = sh_A[A_offset+18];
-            reg_A[7] = sh_A[A_offset+19];
-			//*((float4*) (reg_A + 4)) = (float4*)(sh_A + A_offset + 16);
+			//reg_A[4] = sh_A[A_offset+16];
+            //reg_A[5] = sh_A[A_offset+17];
+            //reg_A[6] = sh_A[A_offset+18];
+            //reg_A[7] = sh_A[A_offset+19];
+			A_offset += 32;
 			
             reg_C.x = fma(reg_A[4], reg_B[1], reg_C.x);
             reg_C.y = fma(reg_A[5], reg_B[1], reg_C.y);
