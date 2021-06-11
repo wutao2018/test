@@ -1,3 +1,5 @@
+#include "cuda_fp16.h"
+
 __device__ void gemm_256_16x16(int M, int N, int K, float *A, float *B, float *C, float *sh){
 
 	float *sh_A = sh;
@@ -381,6 +383,76 @@ __device__ void gemm_256_32x32(int M, int N, int K, float *A, float *B, float *C
 
 			B_start += 8; 
 			* (sh_B + double_buffer + threadIdx.x) = *(B_start);
+		}
+				
+	}
+	*(C_start) = reg_C;
+
+}
+
+
+
+__device__ void gemm_256_32x32_half(int M, int N, int K, float *A, float *B, float *C, float *sh){
+
+	half *sh_A = sh;
+	half *sh_B = sh + 512;  // 2*32*8
+
+	float4 reg_C;
+	half4 reg_A;
+	half  reg_B;
+	int im8 = threadIdx.x & 7;
+	int id8 = threadIdx.x >> 3;
+	int im32 = threadIdx.x & 31;
+	int id32 = threadIdx.x >> 5;
+
+	// Compute block's starting coordinate
+	int block_base_x = blockIdx.y << 5;
+	int block_base_y = blockIdx.x << 5;
+
+	//Load C from global memory to register file
+	float4 *C_start = (float4 *) (C + block_base_x*M + block_base_y + (im8<<2) + (id8)*M);
+
+    reg_C = *C_start;
+
+	//load B from global memory to shared memory
+	float *A_start = (A + block_base_y + (im32) + (id32)*M); 
+	*(sh_A + threadIdx.x) = __float2half(*(A_start));
+
+	//load A from global memory to shared memory
+	float *B_start = (B + K*block_base_x + (id32) + (im32)*K); 
+	*(sh_B + threadIdx.x) = __float2half(*(B_start));
+
+	int double_buffer = 0;
+#pragma unroll
+	for(int k=0; k<K; k+=8){
+
+		__syncthreads();
+		int A_offset = double_buffer + (im8 << 2);
+		int B_offset = double_buffer + id8;
+			
+#pragma unroll
+		for (int i=0; i<8; ++i)	
+		{
+			reg_A = *((half4*) (sh_A + A_offset)); 
+			reg_B = sh_B[B_offset]; 
+
+			reg_C.x = hfma(reg_A.x, reg_B, reg_C.x);
+			reg_C.y = hfma(reg_A.y, reg_B, reg_C.y);
+			reg_C.z = hfma(reg_A.z, reg_B, reg_C.z);
+			reg_C.w = hfma(reg_A.w, reg_B, reg_C.w);
+			
+			A_offset += 32;
+			B_offset += 32;
+		}
+
+		double_buffer ^= 256;
+
+		if (k+8 < K){
+			A_start += M << 3; 
+			*(sh_A + double_buffer + threadIdx.x) = *(A_start);
+
+			B_start += 8; 
+			*(sh_B + double_buffer + threadIdx.x) = *(B_start);
 		}
 				
 	}
