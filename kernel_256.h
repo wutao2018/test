@@ -392,14 +392,14 @@ __device__ void gemm_256_32x32(int M, int N, int K, float *A, float *B, float *C
 
 
 
-__device__ void gemm_256_32x32_half(int M, int N, int K, float *A, float *B, float *C, float *sh){
+__device__ void gemm_256_32x32_half(int M, int N, int K, float *A, float *B, float *C, half *sh){
 
 	half *sh_A = sh;
 	half *sh_B = sh + 512;  // 2*32*8
 
-	float4 reg_C;
-	half4 reg_A;
-	half  reg_B;
+	hlaf2 reg_C[2];
+	half2 reg_A[2];
+	half2  reg_B;
 	int im8 = threadIdx.x & 7;
 	int id8 = threadIdx.x >> 3;
 	int im32 = threadIdx.x & 31;
@@ -410,9 +410,10 @@ __device__ void gemm_256_32x32_half(int M, int N, int K, float *A, float *B, flo
 	int block_base_y = blockIdx.x << 5;
 
 	//Load C from global memory to register file
-	float4 *C_start = (float4 *) (C + block_base_x*M + block_base_y + (im8<<2) + (id8)*M);
+	float2 *C_start = (float2 *) (C + block_base_x*M + block_base_y + (im8<<2) + (id8)*M);
 
-    reg_C = *C_start;
+    reg_C[0] = __float22half2(*C_start);
+	reg_C[1] = __float22half2(*(C_start+1));
 
 	//load B from global memory to shared memory
 	float *A_start = (A + block_base_y + (im32) + (id32)*M); 
@@ -424,8 +425,8 @@ __device__ void gemm_256_32x32_half(int M, int N, int K, float *A, float *B, flo
 
 	int double_buffer = 0;
 #pragma unroll
-	for(int k=0; k<K; k+=8){
-
+	for(int k=0; k<K; k+=8)
+	{
 		__syncthreads();
 		int A_offset = double_buffer + (im8 << 2);
 		int B_offset = double_buffer + id8;
@@ -433,13 +434,17 @@ __device__ void gemm_256_32x32_half(int M, int N, int K, float *A, float *B, flo
 #pragma unroll
 		for (int i=0; i<8; ++i)	
 		{
-			reg_A = *((half4*) (sh_A + A_offset)); 
-			reg_B = sh_B[B_offset]; 
+			reg_A[0] = *((half2*) (sh_A + A_offset)); 
+			reg_B.x = sh_B[B_offset]; 
+			reg_B.x = reg_B.y; 
 
-			reg_C.x = hfma(reg_A.x, reg_B, reg_C.x);
-			reg_C.y = hfma(reg_A.y, reg_B, reg_C.y);
-			reg_C.z = hfma(reg_A.z, reg_B, reg_C.z);
-			reg_C.w = hfma(reg_A.w, reg_B, reg_C.w);
+			reg_C[0] = __hfma2(reg_A[0], reg_B, reg_C[0]);
+			//reg_C.y = hfma(reg_A[0].y, reg_B, reg_C.y);
+			
+			reg_A[1] = *((half2*) (sh_A + A_offset + 2)); 
+			//reg_C.z = hfma(reg_A[1].x, reg_B, reg_C.z);
+			//reg_C.w = hfma(reg_A[1].y, reg_B, reg_C.w);
+			reg_C[1] = __hfma2(reg_A[1], reg_B, reg_C[1]);
 			
 			A_offset += 32;
 			B_offset += 32;
@@ -453,11 +458,12 @@ __device__ void gemm_256_32x32_half(int M, int N, int K, float *A, float *B, flo
 
 			B_start += 8; 
 			*(sh_B + double_buffer + threadIdx.x) = *(B_start);
-		}
-				
+		}	
 	}
-	*(C_start) = reg_C;
-
+	//*(C_start) = reg_C;
+	
+	*(C_start) = __half22float2(reg_C[0]);
+	*(C_start+1) = __half22float2(reg_C[1]);
 }
 
 __device__ void gemm_256_64x64(int M, int N, int K, float *A, float *B, float *C, float *sh){
