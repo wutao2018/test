@@ -57,10 +57,11 @@ __global__ void gemm<256>(int M[], int N[], int K[], float *A[], float *B[], flo
 			break;
 		case 1:
 			if (blockIdx.x * 32 < M[i] && blockIdx.y * 32 < N[i])	
-				gemm_256_32x32(M[i], N[i], K[i], A[i], B[i], C[i], sh);
+				//gemm_256_32x32(M[i], N[i], K[i], A[i], B[i], C[i], sh);
 				//gemm_256_32x32_mdb(M[i], N[i], K[i], A[i], B[i], C[i], sh);
 				//gemm_256_32x32_nrb(M[i], N[i], K[i], A[i], B[i], C[i], sh);
 				//gemm_256_32x32_vl(M[i], N[i], K[i], A[i], B[i], C[i], sh);
+				gemm_256_32x32_half(M[i], N[i], K[i], A[i], B[i], C[i], sh);
 			break;
 		case 2:
 			if (blockIdx.x * 64 < M[i] && blockIdx.y * 64 < N[i])	
