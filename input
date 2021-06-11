@@ -217,6 +217,7 @@ __device__ void gemm_64_16x16_1M(int M, int N, int K, int P, int Q, float *A, fl
     C[C_offset+3] = reg_C.w;
 }
 
+using namespace nvcuda;
 
 //(N*P*Q)%16==0 && (P*Q)%4==0  每个线程读一部分数据，32个线程一起完成warp层级GEMM计算需要的矩阵A,B和C
 __device__ void gemm_32_16x16_tc(int M, int N, int K, int P, int Q, float *A, float *B, float *C, float *sh){
@@ -240,13 +241,13 @@ __device__ void gemm_32_16x16_tc(int M, int N, int K, int P, int Q, float *A, fl
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_frag;  // 初值
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> c_frag;
 
+	int aRow = warpM * 16;
+	int bCol = warpN * 16;
 	// Loop over the K-dimension
     for (int i = 0; i < K; i += 16) 
-	{
-        int aRow = warpM * 16;
+	{    
         int aCol = i;
-        int bRow = i;
-        int bCol = warpN * 16;
+        int bRow = i;        
         
         // Bounds checking
         if (aRow < M && aCol < K && bRow < K && bCol < N) 
