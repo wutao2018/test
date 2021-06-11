@@ -218,6 +218,53 @@ __device__ void gemm_64_16x16_1M(int M, int N, int K, int P, int Q, float *A, fl
 }
 
 
+//(N*P*Q)%16==0 && (P*Q)%4==0  每个线程读一部分数据，32个线程一起完成warp层级GEMM计算需要的矩阵A,B和C
+__device__ void gemm_32_16x16_tc(int M, int N, int K, int P, int Q, float *A, float *B, float *C, float *sh){
+
+	float* sh_A = sh;  // 共享内存有没有用：double buffer
+    float* sh_B = sh + 2*16*8;
+
+	// Leading dimensions. Packed with no transpositions.
+    int lda = M;
+    int ldb = K;
+    int ldc = N;
+    
+    // Tile using a 2D grid
+    int warpM = (blockIdx.x * blockDim.x + threadIdx.x) / 32;
+    int warpN = (blockIdx.y * blockDim.y + threadIdx.y);
+	
+	// Load data
+    // Declare the fragments
+    wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::col_major> a_frag;
+    wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::col_major> b_frag;
+    wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_frag;  // 初值
+    wmma::fragment<wmma::accumulator, 16, 16, 16, float> c_frag;
+
+	// Loop over the K-dimension
+    for (int i = 0; i < K; i += 16) 
+	{
+        int aRow = warpM * 16;
+        int aCol = i;
+        int bRow = i;
+        int bCol = warpN * 16;
+        
+        // Bounds checking
+        if (aRow < M && aCol < K && bRow < K && bCol < N) 
+		{
+            // Load the inputs
+            wmma::load_matrix_sync(a_frag, A + aRow + aCol * lda, lda);
+            wmma::load_matrix_sync(b_frag, B + bRow + bCol * ldb, ldb);
+ 
+            // Perform the matrix multiplication
+            wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag); 
+		}
+    }
+	
+	// Store the output
+    wmma::store_matrix_sync(C + cRow + cCol * ldc, c_frag, ldc, wmma::mem_col_major);	
+}
+
+
 //(N*P*Q)%16==0 && (P*Q)%4!=0
 __device__ void gemm_64_16x16_2(int M, int N, int K, int P, int Q, float *A, float *B, float *C, float *sh){
 
@@ -495,7 +542,8 @@ __global__ void gemm_4(int M, int N1, int N2, int N3, int N4,
    		if (M%16 == 0 && P%2 == 0)  
 		{
    			//(N*P*Q)%16==0 && (P*Q)%4==0
-   			gemm_64_16x16_1(M, N, K, P, Q, A, B, C, sh);
+   			//gemm_64_16x16_1(M, N, K, P, Q, A, B, C, sh);
+			gemm_32_16x16_tc(M, N, K, P, Q, A, B, C, sh);
    		}
    		else if (M%16 == 0)
 		{
