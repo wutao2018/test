@@ -16,7 +16,7 @@ int  main (int argc, char** argv) {
 		exit(EXIT_FAILURE);
 	}
 
-	int BATCH = 4; // atoi(argv[1]);
+	int BATCH = atoi(argv[1]);
 	//int TLP_thres = atoi(argv[2]);
 	int TLP_thres = 65536;
 	
@@ -87,7 +87,7 @@ int  main (int argc, char** argv) {
 
 	//compute grid size and block size
 
-	//int kThreads = 128;
+	//int kThreads = 256;
 	int TLP = 0;
 
 	const int tile_size[6][2] = {
@@ -129,8 +129,6 @@ int  main (int argc, char** argv) {
 				}
 			}
 		}
-		
-		t_strategy[j] = 1;
 	}
 
 /*	
@@ -147,8 +145,8 @@ int  main (int argc, char** argv) {
 	ErrChk(cudaMemcpy(dev_T, t_strategy, BATCH*sizeof(int), cudaMemcpyHostToDevice));
 
 
-    dim3 block_size;   // block的形状影响性能吗
-    block_size.x = 128;
+    dim3 block_size;
+    block_size.x = 256;
     block_size.y = 1;
 	block_size.z = 1;
 
@@ -166,7 +164,8 @@ int  main (int argc, char** argv) {
 	//printf("%d %d %d\n", grid_size.x, grid_size.y, grid_size.z);
 
 	//warm-up
-	gemm<128><<<grid_size, block_size, sizeof(float)*4*64*8>>>(dev_M, dev_N, dev_K, dev_A, dev_B, dev_C);
+	//gemm<256><<<grid_size, block_size, sizeof(float)*4*128*8>>>(dev_M, dev_N, dev_K, dev_A, dev_B, dev_C, dev_T);
+	gemm<256><<<grid_size, block_size, sizeof(half)*4*128*8>>>(dev_M, dev_N, dev_K, dev_A, dev_B, dev_C, dev_T);
 	KernelErrChk();
 
 	ErrChk(cudaEventCreate(&start));
@@ -175,7 +174,8 @@ int  main (int argc, char** argv) {
 	for (int run = 0; run<N_RUNS; ++run)  // 10 times
 	{
 		// sizeof(float)*4*128*8  shared memory
-		gemm<128><<<grid_size, block_size, sizeof(float)*4*64*8>>>(dev_M, dev_N, dev_K, dev_A, dev_B, dev_C);
+		//gemm<256><<<grid_size, block_size, sizeof(float)*4*128*8>>>(dev_M, dev_N, dev_K, dev_A, dev_B, dev_C, dev_T);
+		gemm<256><<<grid_size, block_size, sizeof(half)*4*128*8>>>(dev_M, dev_N, dev_K, dev_A, dev_B, dev_C, dev_T);
 		KernelErrChk();
 	}
 
