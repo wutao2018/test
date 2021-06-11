@@ -46,7 +46,8 @@ template<>
 __global__ void gemm<256>(int M[], int N[], int K[], float *A[], float *B[], float *C[], int T_strategy[]){
 	
 	int i = blockIdx.z;
-	extern __shared__ float sh[];
+	//extern __shared__ float sh[];
+	extern __shared__ half sh[];
 	int t = T_strategy[i];
 
 	switch(t){
