@@ -24,6 +24,8 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+ 
+ //  nvcc -o gemm -arch=sm_70 -lcublas -lcurand fp16.cu
 
 #include <stdio.h>
 #include <curand.h>
@@ -56,10 +58,10 @@ void curandErrCheck_(curandStatus_t stat, const char *file, int line) {
 #include <mma.h>
 using namespace nvcuda;
 
-// Must be multiples of 16 for wmma code to work
-#define MATRIX_M 16384
-#define MATRIX_N 16384
-#define MATRIX_K 16384
+// Must be multiples of 16 for wmma code to work  16384
+#define MATRIX_M 1024
+#define MATRIX_N 1024
+#define MATRIX_K 1024
 
 
 
@@ -261,7 +263,16 @@ __global__ void gemm_256_32x32(int M, int N, int K, float *A, float *B, float *C
 		__syncthreads();
 		int A_offset = double_buffer + (im8 << 2);
 		int B_offset = double_buffer + id8;
-			
+
+		double_buffer ^= 256;
+
+		if (k+8 < K){
+			A_start += M << 3; 
+			* (sh_A + double_buffer + threadIdx.x) = *(A_start);
+
+			B_start += 8; 
+			* (sh_B + double_buffer + threadIdx.x) = *(B_start);
+		}			
 #pragma unroll
 		for (int i=0; i<8; ++i)	{
 			reg_A = *((float4*) (sh_A + A_offset)); 
@@ -274,18 +285,7 @@ __global__ void gemm_256_32x32(int M, int N, int K, float *A, float *B, float *C
 
 			A_offset += 32;
 			B_offset += 32;
-		}
-
-		double_buffer ^= 256;
-
-		if (k+8 < K){
-			A_start += M << 3; 
-			* (sh_A + double_buffer + threadIdx.x) = *(A_start);
-
-			B_start += 8; 
-			* (sh_B + double_buffer + threadIdx.x) = *(B_start);
-		}
-				
+		}		
 	}
 	*(C_start) = reg_C;
 
@@ -351,8 +351,8 @@ int main(int argc, char* argv[]) {
    curandErrCheck(curandGenerateUniform(gen, b_fp32, MATRIX_K * MATRIX_N));
 
    // curand doesn't currently support fp16 so we generate in fp32 and convert to fp16.
-   convertFp32ToFp16 <<< (MATRIX_M * MATRIX_K + 255) / 256, 256 >>> (a_fp16, a_fp32, MATRIX_M * MATRIX_K);
-   convertFp32ToFp16 <<< (MATRIX_K * MATRIX_N + 255) / 256, 256 >>> (b_fp16, b_fp32, MATRIX_K * MATRIX_N);
+   //convertFp32ToFp16 <<< (MATRIX_M * MATRIX_K + 255) / 256, 256 >>> (a_fp16, a_fp32, MATRIX_M * MATRIX_K);
+   //convertFp32ToFp16 <<< (MATRIX_K * MATRIX_N + 255) / 256, 256 >>> (b_fp16, b_fp32, MATRIX_K * MATRIX_N);
 
    curandErrCheck(curandGenerateUniform(gen, c, MATRIX_M * MATRIX_N));
    
@@ -386,7 +386,10 @@ int main(int argc, char* argv[]) {
    
    printf("Running with wmma...\n");
    cudaErrCheck(cudaEventRecord(startWMMA));
-   // wmma_example <<< gridDim, blockDim >>> (a_fp16, b_fp16, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
+   
+   convertFp32ToFp16 <<< (MATRIX_M * MATRIX_K + 255) / 256, 256 >>> (a_fp16, a_fp32, MATRIX_M * MATRIX_K);
+   convertFp32ToFp16 <<< (MATRIX_K * MATRIX_N + 255) / 256, 256 >>> (b_fp16, b_fp32, MATRIX_K * MATRIX_N);
+   // wmma_example <<< gridDim, blockDim >>> (a_fp16, b_fp16, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);   
    // fp16gemm <<< gridDim2, blockDim2 >>> (a_fp16, b_fp16, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
    gemm_256_32x32 <<< gridDim2, blockDim2 >>> (MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
    cudaErrCheck(cudaEventRecord(stopWMMA));
