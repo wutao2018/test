@@ -1,4 +1,6 @@
 __device__ void gemm_128_16x16(int M, int N, int K, float *A, float *B, float *C, int block_base_y, int block_base_x, float *sh){
+	
+	if (threadIdx.x >= 128) return;
 
 	float *sh_A = sh;
 	float *sh_B = sh + 2*16*8;
@@ -62,6 +64,8 @@ __device__ void gemm_128_16x16(int M, int N, int K, float *A, float *B, float *C
 
 __device__ void gemm_128_32x32(int M, int N, int K, float *A, float *B, float *C, int block_base_y, int block_base_x, float *sh){
 
+	if (threadIdx.x >= 128) return;
+	
 	float *sh_A = sh;
 	float *sh_B = sh + 2*32*8;
 
@@ -134,6 +138,8 @@ __device__ void gemm_128_32x32(int M, int N, int K, float *A, float *B, float *C
 
 __device__ void gemm_128_64x64(int M, int N, int K, float *A, float *B, float *C, int block_base_y, int block_base_x, float *sh){
 
+	if (threadIdx.x >= 128) return;
+	
 	float *sh_A = sh;
 	float *sh_B = sh + 2*64*8;
 
@@ -255,6 +261,8 @@ __device__ void gemm_128_64x64(int M, int N, int K, float *A, float *B, float *C
 }
 __device__ void gemm_128_64x128(int M, int N, int K, float *A, float *B, float *C, int block_base_y, int block_base_x, float *sh){
 
+	if (threadIdx.x >= 128) return;
+	
 	float *sh_A = sh;
 	float *sh_B = sh + 2*64*8;
 
@@ -438,7 +446,9 @@ __device__ void gemm_128_64x128(int M, int N, int K, float *A, float *B, float *
 
 __device__ void gemm_128_128x64(int M, int N, int K, float *A, float *B, float *C, int block_base_y, int block_base_x, float *sh){
 
-    float *sh_A = sh;
+	if (threadIdx.x >= 128) return;
+	
+        float *sh_A = sh;
 	float *sh_B = sh + 2*128*8;
 
 	float4 reg_C[16];
