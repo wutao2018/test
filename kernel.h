@@ -29,7 +29,7 @@ __global__ void gemm<128>(int M[], int N[], int K[], float *A[], float *B[], flo
 		float *c = C[ind];
 	
 		int by = Y_Coord[ind];
-		int bx = X_Coord[ind];	
+		int bx = X_Coord[ind];
 
 		switch(t){
 			case 0:
@@ -74,7 +74,7 @@ __global__ void gemm_256(int M[], int N[], int K[], float *A[], float *B[], floa
 	int by;
 	int bx;
 	
-	bool exec_flag = false;
+	//bool exec_flag = false;
 	
 	//main loop for all tiles assigned to this block
 	for (int j=0; j<b; ++j)
@@ -83,35 +83,38 @@ __global__ void gemm_256(int M[], int N[], int K[], float *A[], float *B[], floa
 		{
 			case 0:
 				by = blockIdx.x * 16 * b + j*16; 	
-				bx = blockIdx.y * 16;		
+				bx = blockIdx.y * 16 * b;		
 				if (blockIdx.x *b* 16 < M[i] && blockIdx.y * 16 < N[i])	
-					gemm_256_16x16(M[i], N[i], K[i], A[i], B[i], C[i], by, bx, sh);
+					//gemm_256_16x16(M[i], N[i], K[i], A[i], B[i], C[i], by, bx, sh);
+					gemm_128_16x16(M[i], N[i], K[i], A[i], B[i], C[i], by, bx, sh);
 				break;
 			case 1:
 				by = blockIdx.x * 32 * b + j*32;
 				bx = blockIdx.y * 32;		
 				if (blockIdx.x * 32 < M[i] && blockIdx.y * 32 < N[i])	
 					//gemm_256_32x32(M[i], N[i], K[i], A[i], B[i], C[i], by, bx, sh);
-					gemm_256_32x32_16(M[i], N[i], K[i], A[i], B[i], C[i], by, bx, sh);
+					gemm_128_32x32(M[i], N[i], K[i], A[i], B[i], C[i], by, bx, sh);
 				break;
 			case 2:
 				by = blockIdx.x * 64 * b + j*64;
 				bx = blockIdx.y * 64;		
 				if (blockIdx.x *b* 64 < M[i] && blockIdx.y * 64 < N[i])	
 					//gemm_256_64x64(M[i], N[i], K[i], A[i], B[i], C[i], by, bx, sh);
-					gemm_256_64x64_16(M[i], N[i], K[i], A[i], B[i], C[i], by, bx, sh);
+					gemm_128_64x64(M[i], N[i], K[i], A[i], B[i], C[i], by, bx, sh);
 				break;
 			case 3:
 				by = blockIdx.x * 128 * b + j*128;		
 				bx = blockIdx.y * 64;		
 				if (blockIdx.x *b* 128 < M[i] && blockIdx.y * 64 < N[i])	
-					gemm_256_128x64(M[i], N[i], K[i], A[i], B[i], C[i], by, bx, sh);
+					//gemm_256_128x64(M[i], N[i], K[i], A[i], B[i], C[i], by, bx, sh);
+					gemm_128_128x64(M[i], N[i], K[i], A[i], B[i], C[i], by, bx, sh);
 				break;
 			case 4:
 				by = blockIdx.x * 64 * b + j*64;		
 				bx = blockIdx.y * 128;		
 				if (blockIdx.x *b* 64 < M[i] && blockIdx.y * 128 < N[i])	
-					gemm_256_64x128(M[i], N[i], K[i], A[i], B[i], C[i], by, bx, sh);
+					//gemm_256_64x128(M[i], N[i], K[i], A[i], B[i], C[i], by, bx, sh);
+					gemm_128_64x128(M[i], N[i], K[i], A[i], B[i], C[i], by, bx, sh);
 				break;
 			case 5:
 				by = blockIdx.x * 128 * b + j*128;		
@@ -121,6 +124,6 @@ __global__ void gemm_256(int M[], int N[], int K[], float *A[], float *B[], floa
 				break;
 		}
 	}
-
+		
 	return;
 }
