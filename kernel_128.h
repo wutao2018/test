@@ -634,3 +634,10 @@ __device__ void gemm_128_128x64(int M, int N, int K, float *A, float *B, float *
 	*(C_start + M/2) = reg_C[14];
 	*(C_start + 3*M/4) = reg_C[15];
 }
+
+__device__ void gemm_128_128x128(int M, int N, int K, float *A, float *B, float *C, int block_base_y, int block_base_x, float *sh)
+{
+	gemm_128_128x64( M,  N,  K, A, B, C, block_base_y, block_base_x, sh);
+	block_base_x += 64;
+	gemm_128_128x64( M,  N,  K, A, B, C, block_base_y, block_base_x, sh);
+}
