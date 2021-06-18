@@ -120,7 +120,8 @@ __global__ void gemm_256(int M[], int N[], int K[], float *A[], float *B[], floa
 				by = blockIdx.x * 128 * b + j*128;		
 				bx = blockIdx.y * 128;		
 				if (blockIdx.x *b* 128 < M[i] && blockIdx.y * 128 < N[i])	
-					gemm_256_128x128(M[i], N[i], K[i], A[i], B[i], C[i], by, bx, sh);
+					//gemm_256_128x128(M[i], N[i], K[i], A[i], B[i], C[i], by, bx, sh);
+					gemm_128_128x128(M[i], N[i], K[i], A[i], B[i], C[i], by, bx, sh);
 				break;
 		}
 	}
