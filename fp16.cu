@@ -448,10 +448,10 @@ __global__ void fp16gemm_16x16(float *A, float *B, float *C, int M, int N, int K
 			
             //reg_C.x = fma(reg_A[0], reg_B[0], reg_C.x); // reg_C.x = reg_A[0]*reg_B[0] + reg_A[4]*reg_B[1]
             //reg_C.y = fma(reg_A[1], reg_B[0], reg_C.y);
-			reg_C[0] += (__half22float2)__hmul2(reg_A[0], reg_B[0]);
+			reg_C[0] = __half22float2(__hfma2(reg_A[0], reg_B[0], __float22half2(reg_C[0])));
             //reg_C.z = fma(reg_A[2], reg_B[0], reg_C.z);
             //reg_C.w = fma(reg_A[3], reg_B[0], reg_C.w);
-			reg_C[1] += (__half22float2)__hmul2(reg_A[1], reg_B[0]);
+			reg_C[1] = __half22float2(__hfma2(reg_A[1], reg_B[0], __float22half2(reg_C[1])));
 			
 			//*((float4*) (reg_A + 4)) = *((float4*)(sh_A + A_offset + 16));
 			//reg_B[1] = sh_B[B_offset+1];
@@ -465,8 +465,8 @@ __global__ void fp16gemm_16x16(float *A, float *B, float *C, int M, int N, int K
             //reg_C.y = fma(reg_A[5], reg_B[1], reg_C.y);
             //reg_C.z = fma(reg_A[6], reg_B[1], reg_C.z);
             //reg_C.w = fma(reg_A[7], reg_B[1], reg_C.w);
-			reg_C[0] += (__half22float2)__hmul2(reg_A[2], reg_B[1]);
-			reg_C[1] += (__half22float2)__hmul2(reg_A[3], reg_B[1]);
+			reg_C[0] = __half22float2(__hfma2(reg_A[2], reg_B[1], __float22half2(reg_C[0]))) ;
+			reg_C[1] = __half22float2(__hfma2(reg_A[3], reg_B[1], __float22half2(reg_C[1]))) ;
 
             B_offset += 32;
         }
