@@ -499,6 +499,111 @@ __global__ void fp16gemm_16x16(float *A, float *B, float *C, int M, int N, int K
 }
 
 
+// 64 thread -- 累积误差
+__global__ void fp16gemm_16x16_accum(float *A, float *B, float *C, int M, int N, int K, float alpha, float beta) {
+
+	__shared__ half sh_A[256];
+	__shared__ half sh_B[256];  // 2*16*8
+        
+	float2 reg_C[2];
+	half2 reg_A[4];
+	half2  reg_B[2];
+	
+	reg_C[0].x = 0.f;
+	reg_C[0].y = 0.f;
+	reg_C[1].x = 0.f;
+	reg_C[1].y = 0.f;
+	
+	int im4 = threadIdx.x & 3;
+	int id4 = threadIdx.x >> 2;
+	int im8 = threadIdx.x & 7;
+	int id8 = threadIdx.x >> 3;
+	int im16 = threadIdx.x & 15;
+	int id16 = threadIdx.x >> 4;
+	
+	int thread2 = threadIdx.x << 1;
+
+    // Compute block's starting coordinate
+    int block_base_x = blockIdx.y << 4;
+    int block_base_y = blockIdx.x << 4;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    float2 *A_start = (float2*) (A + block_base_y + (im8 << 1) + (id8)*M);
+    *((half2*)(sh_A + thread2)) = __float22half2_rn(*(A_start));
+
+    //load B from global memory to shared memory
+    float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
+    *((half2*) (sh_B + thread2)) = __float22half2_rn(*(B_start));
+
+    int double_buffer = 0;
+#pragma unroll
+    for(int k = 0; k < K; k += 8)
+	{
+        __syncthreads();
+        int A_offset = double_buffer + (im4 << 2);
+        int B_offset = double_buffer + (id4 << 1);	
+		
+#pragma unroll
+        for (int i=0; i<8; i+=2)   // 全部展开有register spill吗
+		{
+			reg_A[0] = *((half2*)(sh_A + A_offset));
+			reg_A[1] = *((half2*)(sh_A + A_offset + 2));
+			reg_A[2] = *((half2*)(sh_A + A_offset + 16));
+			reg_A[3] = *((half2*)(sh_A + A_offset + 18));
+            //reg_A[0] = sh_A[A_offset];    // A_offset+0 ~ A_offset+3 为什么不用向量呢
+			reg_B[0] = *((half2*)(sh_B + B_offset));
+			reg_B[1].x = reg_B[0].y;
+			reg_B[0].y = reg_B[0].x;
+			reg_B[1].y = reg_B[1].x;
+            //reg_A[1] = sh_A[A_offset+1];  // 为了避免bank冲突, 这8个寄存器都不是连续的【4个就不会重复】，因此不能使用向量传输指令
+            //reg_A[2] = sh_A[A_offset+2];
+            //reg_A[3] = sh_A[A_offset+3];
+			
+            //reg_C.x = fma(reg_A[0], reg_B[0], reg_C.x); // reg_C.x = reg_A[0]*reg_B[0] + reg_A[4]*reg_B[1]
+            //reg_C.y = fma(reg_A[1], reg_B[0], reg_C.y);
+			reg_C[0] = __hmul2(reg_A[0], reg_B[0]);
+            //reg_C.z = fma(reg_A[2], reg_B[0], reg_C.z);
+            //reg_C.w = fma(reg_A[3], reg_B[0], reg_C.w);
+			reg_C[1] = __hmul2(reg_A[1], reg_B[0]);
+			
+			//*((float4*) (reg_A + 4)) = *((float4*)(sh_A + A_offset + 16));
+			//reg_B[1] = sh_B[B_offset+1];
+			//reg_A[4] = sh_A[A_offset+16];
+            //reg_A[5] = sh_A[A_offset+17];
+            //reg_A[6] = sh_A[A_offset+18];
+            //reg_A[7] = sh_A[A_offset+19];
+			A_offset += 32;
+			
+            //reg_C.x = fma(reg_A[4], reg_B[1], reg_C.x);
+            //reg_C.y = fma(reg_A[5], reg_B[1], reg_C.y);
+            //reg_C.z = fma(reg_A[6], reg_B[1], reg_C.z);
+            //reg_C.w = fma(reg_A[7], reg_B[1], reg_C.w);
+			reg_C[0] = __half22float2(__hfma2(reg_A[2], reg_B[1], __float22half2_rn(reg_C[0]))) ;
+			reg_C[1] = __half22float2(__hfma2(reg_A[3], reg_B[1], __float22half2_rn(reg_C[1]))) ;
+
+            B_offset += 32;
+        }
+		
+        double_buffer ^= 128;  // 16*8
+		
+        if (k+8 < K)
+		{
+            A_start += M << 2; // half2 --> 8M
+            *((half2*) (sh_A + double_buffer + thread2)) = __float22half2_rn(*(A_start));
+            B_start += 4;
+            *((half2*) (sh_B + double_buffer + thread2)) = __float22half2_rn(*(B_start));
+        }
+    }
+
+	int ind = block_base_y + (im4<<2);     // 横、纵坐标  M=HW， K = C， N = K
+	// blockIdx.x*16 < (M + (0)*16) ;  M%16 == 0 && P%2 == 0 ;
+	int PQ = M;
+    int C_offset = ind/(PQ)*(PQ*N) + ind%(PQ) + (id4 + block_base_x)*(PQ);
+    *((float2*)(C + C_offset)) = reg_C[0];
+    //C[C_offset+1] = reg_C.y;
+	*((float2*)(C + C_offset + 2)) = reg_C[1];
+}
+
 
 __global__ void gemm_256_32x32(int M, int N, int K, float *A, float *B, float *C){
 
@@ -1432,8 +1537,8 @@ __global__ void gemm_256_128x64_16(int M, int N, int K, float *A, float *B, floa
 	int md4 = M >>2;
 	int im16 = threadIdx.x & 15;
 	int id16 = threadIdx.x >> 4;
-	int im32 = threadIdx.x & 31;
-	int id32 = threadIdx.x >> 5;
+	//int im32 = threadIdx.x & 31;
+	//int id32 = threadIdx.x >> 5;
 	int im64 = threadIdx.x & 63;
 	int id64 = threadIdx.x >> 6;
 	
@@ -1452,7 +1557,7 @@ __global__ void gemm_256_128x64_16(int M, int N, int K, float *A, float *B, floa
 	reg_C[7] = {0.f,0.f,0.f,0.f};//*(C_start + 3*md4);
 
 	//load A from global memory to shared memory
-	float4 *A_start = (float4*) (A + block_base_y + (im32<<2) + (id32)*M); 
+	float4 *A_start = (float4*) (A + block_base_y + (im16<<3) + (id16)*M); 
 	*((float4*) (sh_A + 8*threadIdx.x)) = *(A_start);
 	*((float4*) (sh_A + 8*threadIdx.x + 4)) = *(A_start+1);
 
@@ -1462,7 +1567,7 @@ __global__ void gemm_256_128x64_16(int M, int N, int K, float *A, float *B, floa
 		
 	int double_buffer_A = 0;
 	int double_buffer_B = 0;
-#pragma unrollu
+#pragma unroll
 	for(int k=0; k<K; k+=16)
 	{
 		__syncthreads();
@@ -1471,7 +1576,7 @@ __global__ void gemm_256_128x64_16(int M, int N, int K, float *A, float *B, floa
 			
 #pragma unroll
 		for (int i=0; i<16; ++i)
-		{	
+		{
 			reg_A[0] = *((float4*) (sh_A+A_offset));
 			reg_A[1] = *((float4*) (sh_A+A_offset+64));
 
@@ -1518,7 +1623,7 @@ __global__ void gemm_256_128x64_16(int M, int N, int K, float *A, float *B, floa
 
 			A_offset += 128;
 			B_offset += 1;
-			if ((i+1)&3 == 0) B_offset += 508;
+			if (((i+1)&3) == 0) B_offset += 252;
 		}
 
 		double_buffer_A ^= 2048;
@@ -1546,6 +1651,262 @@ __global__ void gemm_256_128x64_16(int M, int N, int K, float *A, float *B, floa
 	*(C_start + md2) = reg_C[6];
 	*(C_start + md2 + md4) = reg_C[7];
 }
+
+__global__ void gemm_256_128x64_16_2(int M, int N, int K, float *A, float *B, float *C)
+{
+	__shared__ float sh_A[4096];
+	__shared__ float sh_B[2048];
+
+	float4 reg_C[8];
+	float4 reg_A[2];
+	float  reg_B[4];
+
+	// Compute block's starting coordinate
+	int block_base_x = blockIdx.y<<6;
+	int block_base_y = blockIdx.x<<7;
+	
+	int md2 = M >>1;
+	int md4 = M >>2;
+	int im16 = threadIdx.x & 15;
+	int id16 = threadIdx.x >> 4;
+	//int im32 = threadIdx.x & 31;
+	//int id32 = threadIdx.x >> 5;
+	int im64 = threadIdx.x & 63;
+	int id64 = threadIdx.x >> 6;
+	
+	//Load C from global memory to register file
+	float4 *C_start = (float4*) (C + block_base_x*M + block_base_y + (im16<<2) + (id16<<2)*M);
+
+    reg_C[0] = {0.f,0.f,0.f,0.f};//*C_start;
+	reg_C[1] = {0.f,0.f,0.f,0.f};//*(C_start + md4);
+	reg_C[2] = {0.f,0.f,0.f,0.f};//*(C_start + md2);
+	reg_C[3] = {0.f,0.f,0.f,0.f};//*(C_start + 3*md4);
+
+	C_start += 16;
+	reg_C[4] = {0.f,0.f,0.f,0.f};//*(C_start);
+	reg_C[5] = {0.f,0.f,0.f,0.f};//*(C_start + md4);
+	reg_C[6] = {0.f,0.f,0.f,0.f};//*(C_start + md2);
+	reg_C[7] = {0.f,0.f,0.f,0.f};//*(C_start + 3*md4);
+
+	//load A from global memory to shared memory
+	float4 *A_start = (float4*) (A + block_base_y + (im16<<3) + (id16)*M); 
+	*((float4*) (sh_A + 8*threadIdx.x)) = *(A_start);
+	*((float4*) (sh_A + 8*threadIdx.x + 4)) = *(A_start+1);
+
+	//load A from global memory to shared memory
+	float2 *B_start = (float2*) (B + K*block_base_x + (id64<<2) + (im64)*K); 
+	*((float2*) (sh_B + (id64<<8) + 2*im64)) = *(B_start);
+	*((float2*) (sh_B + (id64<<8) + 2*im64 + 128)) = *(B_start+1);
+	
+	int double_buffer_A = 0;
+	int double_buffer_B = 0;
+#pragma unroll
+	for(int k=0; k<K; k+=16)
+	{
+		__syncthreads();
+		int A_offset = double_buffer_A + (im16<<2);
+		int B_offset = double_buffer_B + (id16<<3);
+			
+#pragma unroll
+		for (int i=0; i<16; ++i)
+		{
+			reg_A[0] = *((float4*) (sh_A+A_offset));
+			reg_A[1] = *((float4*) (sh_A+A_offset+64));
+
+			reg_B[0] = sh_B[B_offset];
+			reg_B[1] = sh_B[B_offset+2];
+			reg_B[2] = sh_B[B_offset+4];
+			reg_B[3] = sh_B[B_offset+6];
+
+			reg_C[0].x = fma(reg_A[0].x, reg_B[0], reg_C[0].x);
+			reg_C[1].x = fma(reg_A[0].x, reg_B[1], reg_C[1].x);
+			reg_C[2].x = fma(reg_A[0].x, reg_B[2], reg_C[2].x);
+			reg_C[3].x = fma(reg_A[0].x, reg_B[3], reg_C[3].x);
+			reg_C[4].x = fma(reg_A[1].x, reg_B[0], reg_C[4].x);
+			reg_C[5].x = fma(reg_A[1].x, reg_B[1], reg_C[5].x);
+			reg_C[6].x = fma(reg_A[1].x, reg_B[2], reg_C[6].x);
+			reg_C[7].x = fma(reg_A[1].x, reg_B[3], reg_C[7].x);
+
+			reg_C[0].y = fma(reg_A[0].y, reg_B[0], reg_C[0].y);
+			reg_C[1].y = fma(reg_A[0].y, reg_B[1], reg_C[1].y);
+			reg_C[2].y = fma(reg_A[0].y, reg_B[2], reg_C[2].y);
+			reg_C[3].y = fma(reg_A[0].y, reg_B[3], reg_C[3].y);
+			reg_C[4].y = fma(reg_A[1].y, reg_B[0], reg_C[4].y);
+			reg_C[5].y = fma(reg_A[1].y, reg_B[1], reg_C[5].y);
+			reg_C[6].y = fma(reg_A[1].y, reg_B[2], reg_C[6].y);
+			reg_C[7].y = fma(reg_A[1].y, reg_B[3], reg_C[7].y);
+
+			reg_C[0].z = fma(reg_A[0].z, reg_B[0], reg_C[0].z);
+			reg_C[1].z = fma(reg_A[0].z, reg_B[1], reg_C[1].z);
+			reg_C[2].z = fma(reg_A[0].z, reg_B[2], reg_C[2].z);
+			reg_C[3].z = fma(reg_A[0].z, reg_B[3], reg_C[3].z);
+			reg_C[4].z = fma(reg_A[1].z, reg_B[0], reg_C[4].z);
+			reg_C[5].z = fma(reg_A[1].z, reg_B[1], reg_C[5].z);
+			reg_C[6].z = fma(reg_A[1].z, reg_B[2], reg_C[6].z);
+			reg_C[7].z = fma(reg_A[1].z, reg_B[3], reg_C[7].z);
+
+			reg_C[0].w = fma(reg_A[0].w, reg_B[0], reg_C[0].w);
+			reg_C[1].w = fma(reg_A[0].w, reg_B[1], reg_C[1].w);
+			reg_C[2].w = fma(reg_A[0].w, reg_B[2], reg_C[2].w);
+			reg_C[3].w = fma(reg_A[0].w, reg_B[3], reg_C[3].w);
+			reg_C[4].w = fma(reg_A[1].w, reg_B[0], reg_C[4].w);
+			reg_C[5].w = fma(reg_A[1].w, reg_B[1], reg_C[5].w);
+			reg_C[6].w = fma(reg_A[1].w, reg_B[2], reg_C[6].w);
+			reg_C[7].w = fma(reg_A[1].w, reg_B[3], reg_C[7].w);
+
+			A_offset += 128;
+			B_offset += (1 + (i&1)*126);
+		}
+
+		double_buffer_A ^= 2048;
+		double_buffer_B ^= 1024;
+
+		if (k+16 < K){
+			A_start += M<<2; 
+			*((float4*) (sh_A + double_buffer_A + 8*threadIdx.x)) = *(A_start);
+			*((float4*) (sh_A + double_buffer_A + 8*threadIdx.x + 4)) = *(A_start+1);
+
+			B_start += 8; 
+			*((float2*) (sh_B+ double_buffer_A  + (id64<<8) + 2*im64)) = *(B_start);
+			*((float2*) (sh_B+ double_buffer_A  + (id64<<8) + 2*im64 + 128)) = *(B_start + 1);
+		}
+	}
+	
+	C_start -= 16;
+    *C_start = reg_C[0];
+	*(C_start + md4) = reg_C[1];
+	*(C_start + md2) = reg_C[2];
+	*(C_start + md2 + md4) = reg_C[3];
+
+	C_start += 16;
+	*(C_start) = reg_C[4];
+	*(C_start + md4) = reg_C[5];
+	*(C_start + md2) = reg_C[6];
+	*(C_start + md2 + md4) = reg_C[7];
+}
+
+
+__global__ void gemm_256_128x64(int M, int N, int K, float *A, float *B, float *C){
+
+	__shared__ float sh_A[2048];
+	__shared__ float sh_B[1024];
+
+	float4 reg_C[8];
+	float4 reg_A[2];
+	float  reg_B[4];
+
+	// Compute block's starting coordinate
+	int block_base_x = blockIdx.y*64;
+	int block_base_y = blockIdx.x*128;
+
+	//Load C from global memory to register file
+	float4 *C_start = (float4*) (C + block_base_x*M + block_base_y + (threadIdx.x%16)*4 + (threadIdx.x/16)*4*M);
+
+    reg_C[0] = *C_start;
+	reg_C[1] = *(C_start + M/4);
+	reg_C[2] = *(C_start + M/2);
+	reg_C[3] = *(C_start + 3*M/4);
+
+	C_start += 16;
+	reg_C[4] = *(C_start);
+	reg_C[5] = *(C_start + M/4);
+	reg_C[6] = *(C_start + M/2);
+	reg_C[7] = *(C_start + 3*M/4);
+
+	//load A from global memory to shared memory
+	float4 *A_start = (float4*) (A + block_base_y + (threadIdx.x%32)*4 + (threadIdx.x/32)*M); 
+	*((float4*) (sh_A + 4*threadIdx.x)) = *(A_start);
+
+	//load A from global memory to shared memory
+	float2 *B_start = (float2*) (B + K*block_base_x + (threadIdx.x/64)*2 + (threadIdx.x%64)*K); 
+	*((float2*) (sh_B + 2*threadIdx.x)) = *(B_start);
+		
+	int double_buffer_A = 0;
+	int double_buffer_B = 0;
+#pragma unroll
+	for(int k=0; k<K; k+=8){
+
+		__syncthreads();
+		int A_offset = double_buffer_A + (threadIdx.x%16)*4;
+		int B_offset = double_buffer_B + ((threadIdx.x/16)*8);
+			
+#pragma unroll
+		for (int i=0; i<8; ++i)	{
+			
+			reg_A[0] = *((float4*) (sh_A+A_offset));
+			reg_A[1] = *((float4*) (sh_A+A_offset+64));
+
+			reg_B[0] = sh_B[B_offset];
+			reg_B[1] = sh_B[B_offset+2];
+			reg_B[2] = sh_B[B_offset+4];
+			reg_B[3] = sh_B[B_offset+6];
+
+			reg_C[0].x = fma(reg_A[0].x, reg_B[0], reg_C[0].x);
+			reg_C[1].x = fma(reg_A[0].x, reg_B[1], reg_C[1].x);
+			reg_C[2].x = fma(reg_A[0].x, reg_B[2], reg_C[2].x);
+			reg_C[3].x = fma(reg_A[0].x, reg_B[3], reg_C[3].x);
+			reg_C[4].x = fma(reg_A[1].x, reg_B[0], reg_C[4].x);
+			reg_C[5].x = fma(reg_A[1].x, reg_B[1], reg_C[5].x);
+			reg_C[6].x = fma(reg_A[1].x, reg_B[2], reg_C[6].x);
+			reg_C[7].x = fma(reg_A[1].x, reg_B[3], reg_C[7].x);
+
+			reg_C[0].y = fma(reg_A[0].y, reg_B[0], reg_C[0].y);
+			reg_C[1].y = fma(reg_A[0].y, reg_B[1], reg_C[1].y);
+			reg_C[2].y = fma(reg_A[0].y, reg_B[2], reg_C[2].y);
+			reg_C[3].y = fma(reg_A[0].y, reg_B[3], reg_C[3].y);
+			reg_C[4].y = fma(reg_A[1].y, reg_B[0], reg_C[4].y);
+			reg_C[5].y = fma(reg_A[1].y, reg_B[1], reg_C[5].y);
+			reg_C[6].y = fma(reg_A[1].y, reg_B[2], reg_C[6].y);
+			reg_C[7].y = fma(reg_A[1].y, reg_B[3], reg_C[7].y);
+
+			reg_C[0].z = fma(reg_A[0].z, reg_B[0], reg_C[0].z);
+			reg_C[1].z = fma(reg_A[0].z, reg_B[1], reg_C[1].z);
+			reg_C[2].z = fma(reg_A[0].z, reg_B[2], reg_C[2].z);
+			reg_C[3].z = fma(reg_A[0].z, reg_B[3], reg_C[3].z);
+			reg_C[4].z = fma(reg_A[1].z, reg_B[0], reg_C[4].z);
+			reg_C[5].z = fma(reg_A[1].z, reg_B[1], reg_C[5].z);
+			reg_C[6].z = fma(reg_A[1].z, reg_B[2], reg_C[6].z);
+			reg_C[7].z = fma(reg_A[1].z, reg_B[3], reg_C[7].z);
+
+			reg_C[0].w = fma(reg_A[0].w, reg_B[0], reg_C[0].w);
+			reg_C[1].w = fma(reg_A[0].w, reg_B[1], reg_C[1].w);
+			reg_C[2].w = fma(reg_A[0].w, reg_B[2], reg_C[2].w);
+			reg_C[3].w = fma(reg_A[0].w, reg_B[3], reg_C[3].w);
+			reg_C[4].w = fma(reg_A[1].w, reg_B[0], reg_C[4].w);
+			reg_C[5].w = fma(reg_A[1].w, reg_B[1], reg_C[5].w);
+			reg_C[6].w = fma(reg_A[1].w, reg_B[2], reg_C[6].w);
+			reg_C[7].w = fma(reg_A[1].w, reg_B[3], reg_C[7].w);
+
+			A_offset += 128;
+			B_offset += (1 + (i%2)*126);
+		}
+
+		double_buffer_A ^= 1024;
+		double_buffer_B ^= 512;
+
+		if (k+8 < K){
+			A_start += 2*M; 
+			*((float4*) (sh_A + double_buffer_A + 4*threadIdx.x)) = *(A_start);
+
+			B_start += 4; 
+			*((float2*) (sh_B + double_buffer_B + 2*threadIdx.x)) = *(B_start);
+		}
+				
+	}
+	C_start -= 16;
+    *C_start = reg_C[0];
+	*(C_start + M/4) = reg_C[1];
+	*(C_start + M/2) = reg_C[2];
+	*(C_start + 3*M/4) = reg_C[3];
+
+	C_start += 16;
+	*(C_start) = reg_C[4];
+	*(C_start + M/4) = reg_C[5];
+	*(C_start + M/2) = reg_C[6];
+	*(C_start + 3*M/4) = reg_C[7];
+
+}
+
 
 
 int main(int argc, char* argv[]) 
@@ -1656,7 +2017,8 @@ int main(int argc, char* argv[])
   //gemm_256_64x64_16<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
   //gemm_256_128x128_16<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
   //gemm_256_64x128_16<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
-  gemm_256_128x64_16_16<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+  gemm_256_128x64_16_2<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+  //gemm_256_128x64<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
    cudaErrCheck(cudaEventRecord(stopWMMA));
    
    // Now using cuBLAS
