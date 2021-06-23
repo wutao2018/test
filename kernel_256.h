@@ -1053,57 +1053,61 @@ __device__ void gemm_256_128x64_16(int M, int N, int K, float *A, float *B, floa
 		__syncthreads();
 		int A_offset = double_buffer_A + (im16<<2);
 		int B_offset = double_buffer_B + (id16<<3);
-			
+		
 #pragma unroll
 		for (int i=0; i<16; ++i)
 		{	
 			reg_A[0] = *((float4*) (sh_A+A_offset));
-			reg_A[1] = *((float4*) (sh_A+A_offset+64));
-
 			reg_B[0] = sh_B[B_offset];
-			reg_B[1] = sh_B[B_offset+4];
-			reg_B[2] = sh_B[B_offset+8];
-			reg_B[3] = sh_B[B_offset+12];
 
 			reg_C[0].x = fma(reg_A[0].x, reg_B[0], reg_C[0].x);
+			reg_C[0].y = fma(reg_A[0].y, reg_B[0], reg_C[0].y);
+			reg_C[0].z = fma(reg_A[0].z, reg_B[0], reg_C[0].z);
+			reg_C[0].w = fma(reg_A[0].w, reg_B[0], reg_C[0].w);
+			
+			reg_B[1] = sh_B[B_offset+4];
 			reg_C[1].x = fma(reg_A[0].x, reg_B[1], reg_C[1].x);
+			reg_C[1].y = fma(reg_A[0].y, reg_B[1], reg_C[1].y);	
+			reg_C[1].z = fma(reg_A[0].z, reg_B[1], reg_C[1].z);
+			reg_C[1].w = fma(reg_A[0].w, reg_B[1], reg_C[1].w);
+
+			reg_B[2] = sh_B[B_offset+8];			
+			reg_A[1] = *((float4*) (sh_A+A_offset+64));
+
 			reg_C[2].x = fma(reg_A[0].x, reg_B[2], reg_C[2].x);
+			reg_C[2].y = fma(reg_A[0].y, reg_B[2], reg_C[2].y);
+			reg_C[2].z = fma(reg_A[0].z, reg_B[2], reg_C[2].z);
+			reg_C[2].w = fma(reg_A[0].w, reg_B[2], reg_C[2].w);
+			
+			reg_C[4].y = fma(reg_A[1].y, reg_B[0], reg_C[4].y);
+			reg_C[5].y = fma(reg_A[1].y, reg_B[1], reg_C[5].y);
+			reg_C[4].z = fma(reg_A[1].z, reg_B[0], reg_C[4].z);
+			reg_C[5].z = fma(reg_A[1].z, reg_B[1], reg_C[5].z);	
+			reg_C[4].w = fma(reg_A[1].w, reg_B[0], reg_C[4].w);
+			reg_C[5].w = fma(reg_A[1].w, reg_B[1], reg_C[5].w);			
+			
+			A_offset += 128;
+			reg_B[3] = sh_B[B_offset+12];		
 			reg_C[3].x = fma(reg_A[0].x, reg_B[3], reg_C[3].x);
+			reg_C[3].y = fma(reg_A[0].y, reg_B[3], reg_C[3].y);			
+			reg_C[3].z = fma(reg_A[0].z, reg_B[3], reg_C[3].z);
+			reg_C[3].w = fma(reg_A[0].w, reg_B[3], reg_C[3].w);
+			
 			reg_C[4].x = fma(reg_A[1].x, reg_B[0], reg_C[4].x);
 			reg_C[5].x = fma(reg_A[1].x, reg_B[1], reg_C[5].x);
 			reg_C[6].x = fma(reg_A[1].x, reg_B[2], reg_C[6].x);
 			reg_C[7].x = fma(reg_A[1].x, reg_B[3], reg_C[7].x);
 
-			reg_C[0].y = fma(reg_A[0].y, reg_B[0], reg_C[0].y);
-			reg_C[1].y = fma(reg_A[0].y, reg_B[1], reg_C[1].y);
-			reg_C[2].y = fma(reg_A[0].y, reg_B[2], reg_C[2].y);
-			reg_C[3].y = fma(reg_A[0].y, reg_B[3], reg_C[3].y);
-			reg_C[4].y = fma(reg_A[1].y, reg_B[0], reg_C[4].y);
-			reg_C[5].y = fma(reg_A[1].y, reg_B[1], reg_C[5].y);
+			B_offset += 1;
+			if (((i+1)&3) == 0) B_offset += 252;
+			
 			reg_C[6].y = fma(reg_A[1].y, reg_B[2], reg_C[6].y);
 			reg_C[7].y = fma(reg_A[1].y, reg_B[3], reg_C[7].y);
-
-			reg_C[0].z = fma(reg_A[0].z, reg_B[0], reg_C[0].z);
-			reg_C[1].z = fma(reg_A[0].z, reg_B[1], reg_C[1].z);
-			reg_C[2].z = fma(reg_A[0].z, reg_B[2], reg_C[2].z);
-			reg_C[3].z = fma(reg_A[0].z, reg_B[3], reg_C[3].z);
-			reg_C[4].z = fma(reg_A[1].z, reg_B[0], reg_C[4].z);
-			reg_C[5].z = fma(reg_A[1].z, reg_B[1], reg_C[5].z);
 			reg_C[6].z = fma(reg_A[1].z, reg_B[2], reg_C[6].z);
 			reg_C[7].z = fma(reg_A[1].z, reg_B[3], reg_C[7].z);
-
-			reg_C[0].w = fma(reg_A[0].w, reg_B[0], reg_C[0].w);
-			reg_C[1].w = fma(reg_A[0].w, reg_B[1], reg_C[1].w);
-			reg_C[2].w = fma(reg_A[0].w, reg_B[2], reg_C[2].w);
-			reg_C[3].w = fma(reg_A[0].w, reg_B[3], reg_C[3].w);
-			reg_C[4].w = fma(reg_A[1].w, reg_B[0], reg_C[4].w);
-			reg_C[5].w = fma(reg_A[1].w, reg_B[1], reg_C[5].w);
 			reg_C[6].w = fma(reg_A[1].w, reg_B[2], reg_C[6].w);
 			reg_C[7].w = fma(reg_A[1].w, reg_B[3], reg_C[7].w);
 
-			A_offset += 128;
-			B_offset += 1;
-			if (((i+1)&3) == 0) B_offset += 252;
 		}
 
 		double_buffer_A ^= 2048;
