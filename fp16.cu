@@ -47,6 +47,12 @@ const int WMMA_N = 16;
 const int WMMA_K = 16;
 
 
+__global__ void convertFp32ToFp16 (half *out, float *in, int n) {
+   int idx = blockDim.x * blockIdx.x + threadIdx.x;
+   if (idx < n) {
+      out[idx] = in[idx];
+   }
+}
 
 // 64 thread
 __global__ void fp16gemm_16x16(float *A, float *B, float *C, int M, int N, int K, float alpha, float beta) {
