@@ -390,9 +390,13 @@ __global__ void gemm_64_16x16_3(int M, int N, int K, float *A, float *B, float *
 
 
    //load A from global memory to shared memory
-   int A_offset = block_base_y + (threadIdx.x%16) + (threadIdx.x/16)*M; // 跟前面的不一样
-   sh_A[threadIdx.x] = A[A_offset%(M*K)];
-   sh_A[threadIdx.x+64] = A[(A_offset+4*M)%(M*K)];  
+   //int A_offset = block_base_y + (threadIdx.x%16) + (threadIdx.x/16)*M; // 跟前面的不一样
+   //sh_A[threadIdx.x] = A[A_offset%(M*K)];
+   //sh_A[threadIdx.x+64] = A[(A_offset+4*M)%(M*K)];
+   
+	int A_offset = block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M;
+    //float2 *A_start = (float2*) (A + block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M);
+    *((float2*) (sh_A + 2*threadIdx.x)) = *(float2*)(A + (A_offset%(M*K)));
 
    //load A from global memory to shared memory
    int B_offset =  K*block_base_x + (threadIdx.x/16)*2 + (threadIdx.x%16)*K;
@@ -436,11 +440,15 @@ __global__ void gemm_64_16x16_3(int M, int N, int K, float *A, float *B, float *
 
        double_buffer ^= 128;
 
-       if (k+8 < K)
+       if (k + 8 < K)
 	   {
            A_offset += 8*M;
-           sh_A[double_buffer+threadIdx.x] = A[A_offset%(M*K)];
-           sh_A[double_buffer+threadIdx.x+64] = A[(A_offset+4*M)%(M*K)];
+           //sh_A[double_buffer+threadIdx.x] = A[A_offset%(M*K)];
+           //sh_A[double_buffer+threadIdx.x+64] = A[(A_offset+4*M)%(M*K)];
+		   int A_offset = block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M;
+           //float2 *A_start = (float2*) (A + block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M);
+           *((float2*) (sh_A + 2*threadIdx.x)) = *(float2*)(A + (A_offset%(M*K)));
+		   
            B_offset += 8;
            sh_B[double_buffer+threadIdx.x*2] = B[B_offset%(K*N)];
            sh_B[double_buffer+threadIdx.x*2+1] = B[(B_offset+1)%(K*N)];
@@ -465,7 +473,8 @@ __global__ void gemm_64_16x16_3(int M, int N, int K, float *A, float *B, float *
    {
        int ruler = (threadIdx.x%4)*4;
        int rag = M%16;
-       if ((ruler)<rag){
+	   
+       if ((ruler) < rag){
            C[C_offset] = reg_C[0];
 		}
        if ((ruler+1)<rag){
