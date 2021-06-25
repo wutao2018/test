@@ -458,11 +458,25 @@ __global__ void gemm_64_16x16_3(int M, int N, int K, float *A, float *B, float *
 
 	int ind = blockIdx.x*16 + (threadIdx.x%4)*4;  // 横、纵坐标  M=HW， K = C， N = K
 	// blockIdx.x*16 < (M + (0)*16) ;  M%16 == 0 && P%2 == 0 ;   relu = max(0, x)
-    int C_offset = ind/(P*Q)*(P*Q*N) + ind%(P*Q) + (threadIdx.x/4)*(P*Q) + blockIdx.y*16*(P*Q);
-    C[C_offset] = reg_C.x > 0 ? reg_C.x : 0;
-    C[C_offset+1] = reg_C.y;
-    C[C_offset+2] = reg_C.z;
-    C[C_offset+3] = reg_C.w;
+    int C_offset = ind/(M)*(M*N) + ind%(M) + (threadIdx.x/4)*(M) + blockIdx.y*16*(M);
+
+   if (blockIdx.x < M/16)
+   {
+		C[C_offset] = reg_C.x;
+		C[C_offset+1] = reg_C.y;
+		C[C_offset+2] = reg_C.z;
+		C[C_offset+3] = reg_C.w;
+   }
+   else
+   {
+       int ruler = (threadIdx.x%4)*4;
+       int rag = M%16;
+	   
+       if (ruler < rag)
+	   {
+           C[C_offset] = reg_C[0];
+	   }
+   }
 }
 
 int main(int argc, char* argv[]) 
