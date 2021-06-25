@@ -3,9 +3,31 @@
 #include <cublas_v2.h>
 
 #define THREADS_NUM 1024
-// 65536/4 = 16383 = 1024x16, 64*1024 = 65536
-#define L1_SIZE (65536/4)
+// 65536/4 = 16384 = 1024x16, 64*1024 = 65536
+#define L1_SIZE 16384
 #define WARP_SIZE 32
+
+// Define some error checking macros.
+#define cudaErrCheck(stat) { cudaErrCheck_((stat), __FILE__, __LINE__); }
+void cudaErrCheck_(cudaError_t stat, const char *file, int line) {
+   if (stat != cudaSuccess) {
+      fprintf(stderr, "CUDA Error: %s %s %d\n", cudaGetErrorString(stat), file, line);
+   }
+}
+
+#define cublasErrCheck(stat) { cublasErrCheck_((stat), __FILE__, __LINE__); }
+void cublasErrCheck_(cublasStatus_t stat, const char *file, int line) {
+   if (stat != CUBLAS_STATUS_SUCCESS) {
+      fprintf(stderr, "cuBLAS Error: %d %s %d\n", stat, file, line);
+   }
+}
+
+#define curandErrCheck(stat) { curandErrCheck_((stat), __FILE__, __LINE__); }
+void curandErrCheck_(curandStatus_t stat, const char *file, int line) {
+   if (stat != CURAND_STATUS_SUCCESS) {
+      fprintf(stderr, "cuRand Error: %d %s %d\n", stat, file, line);
+   }
+}
 
 __global__ void l1_bw(uint32_t *startClk, uint32_t *stopClk, float *dsink, uint32_t *posArray)
 {
@@ -95,7 +117,6 @@ int main(int argc, char* argv[])
    
    l1_bw<<<gridDim2, blockDim2>>>(startClk, stopClk, dsink, posArray);
    
-
    printf("\nChecking results...\n");
    cudaErrCheck(cudaMemcpy(time_host_st, startClk, THREADS_NUM * sizeof(uint32_t), cudaMemcpyDeviceToHost));
    cudaErrCheck(cudaMemcpy(time_host_ed, stopClk, THREADS_NUM * sizeof(uint32_t), cudaMemcpyDeviceToHost));
@@ -117,4 +138,3 @@ int main(int argc, char* argv[])
    
    return 0;
 }
-
