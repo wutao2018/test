@@ -260,17 +260,31 @@ __global__ void gemm_64_16x16_3_tensor(int M, int N, int K, float *A, float *B, 
 
 
     //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
-    float2 *A_start = (float2*) (A + block_base_y + (im4 << 2) + (id4)*M);
-	if (block_base_y == 3)
+    float *A_start = (A + block_base_y + (im4 << 2) + (id4)*M);
+	if (blockIdx.x == 3)
 	{
 		if (id4 == 0)
-			*((half2*)(sh_A + thread4)) = __float22half2_rn({(*(A_start)).x, 0.f});
-		*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn({0.f, 0.f});
+		{
+			*(sh_A + thread4) = __float2half_rn(*(A_start));
+		}
+		else
+		{
+			*(sh_A + thread4) = __float2half_rn(0.f);
+		}
+		
+		//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn({0.f, 0.f});
+		*(sh_A + thread4 + 1) = __float2half_rn(0.f);
+		*(sh_A + thread4 + 2) = __float2half_rn(0.f);
+		*(sh_A + thread4 + 3) = __float2half_rn(0.f);
 	}
 	else
 	{
-		*((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
-		*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));		
+		//*((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
+		//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
+		*(sh_A + thread4) = __float2half_rn(*(A_start));
+		*(sh_A + thread4 + 1) = __float2half_rn(*(A_start+1));
+		*(sh_A + thread4 + 2) = __float2half_rn(*(A_start+2));
+		*(sh_A + thread4 + 3) = __float2half_rn(*(A_start+3));
 	}
 
     //load B from global memory to shared memory
@@ -305,17 +319,31 @@ __global__ void gemm_64_16x16_3_tensor(int M, int N, int K, float *A, float *B, 
 
        if (k+16 < K)
 	   {
-           A_start += M<<3;
-			if (block_base_y == 3)
+           A_start += M<<4;
+			if (blockIdx.x == 3)
 			{
 				if (id4 == 0)
-					*((half2*)(sh_A + double_buffer  + thread4)) = __float22half2_rn({(*(A_start)).x, 0.f});
-				*((half2*)(sh_A + double_buffer  + thread4 + 2)) = __float22half2_rn({0.f, 0.f});
+				{
+					*(sh_A + double_buffer + thread4) = __float2half_rn(*(A_start));
+				}
+				else
+				{
+					*(sh_A + double_buffer + thread4) = __float2half_rn(0.f);
+				}
+				
+				//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn({0.f, 0.f});
+				*(sh_A + double_buffer + thread4 + 1) = __float2half_rn(0.f);
+				*(sh_A + double_buffer + thread4 + 2) = __float2half_rn(0.f);
+				*(sh_A + double_buffer + thread4 + 3) = __float2half_rn(0.f);
 			}
 			else
 			{
-				*((half2*)(sh_A + double_buffer  + thread4)) = __float22half2_rn(*(A_start));
-				*((half2*)(sh_A + double_buffer  + thread4 + 2)) = __float22half2_rn(*(A_start + 1));		
+				//*((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
+				//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
+				*(sh_A + double_buffer + thread4) = __float2half_rn(*(A_start));
+				*(sh_A + double_buffer + thread4 + 1) = __float2half_rn(*(A_start+1));
+				*(sh_A + double_buffer + thread4 + 2) = __float2half_rn(*(A_start+2));
+				*(sh_A + double_buffer + thread4 + 3) = __float2half_rn(*(A_start+3));
 			}
 			
            B_start += 8;
@@ -457,7 +485,6 @@ __global__ void gemm_64_16x16_3(int M, int N, int K, float *A, float *B, float *
     }
 
 	int ind = blockIdx.x*16 + (threadIdx.x%4)*4;  // 横、纵坐标  M=HW， K = C， N = K
-	// blockIdx.x*16 < (M + (0)*16) ;  M%16 == 0 && P%2 == 0 ;   relu = max(0, x)
     int C_offset = ind/(M)*(M*N) + ind%(M) + (threadIdx.x/4)*(M) + blockIdx.y*16*(M);
 
    if (blockIdx.x < M/16)
@@ -472,9 +499,9 @@ __global__ void gemm_64_16x16_3(int M, int N, int K, float *A, float *B, float *
        int ruler = (threadIdx.x%4)*4;
        int rag = M%16;
 	   
-       if (ruler < rag)
+       if (ruler == 0)
 	   {
-           C[C_offset] = reg_C[0];
+           C[C_offset] = reg_C.x;
 	   }
    }
 }
@@ -568,7 +595,7 @@ int main(int argc, char* argv[])
 
    dim3 gridDim3;
    dim3 blockDim3;
-   gridDim3.x = MATRIX_M/16; gridDim3.y = MATRIX_N/16; gridDim3.z = 1;
+   gridDim3.x = MATRIX_M/16 + 1; gridDim3.y = MATRIX_N/16; gridDim3.z = 1;
    blockDim3.x = 64; blockDim3.y = 1; blockDim3.z = 1;
    
    printf("Running with wmma...\n");
@@ -578,8 +605,8 @@ int main(int argc, char* argv[])
    //convertFp32ToFp16 <<< (MATRIX_K * MATRIX_N + 255) / 256, 256 >>> (b_fp16, b_fp32, MATRIX_K * MATRIX_N);
    //fp16gemm_16x16<<< gridDim3, blockDim3 >>>(a_fp32, b_fp32, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
    //fp16gemm_16x16_tensor<<< gridDim3, blockDim3 >>>(a_fp32, b_fp32, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
-   //gemm_64_16x16_3_tensor<<< gridDim3, blockDim3 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
-   gemm_64_16x16_3 <<< gridDim3, blockDim3 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+   gemm_64_16x16_3_tensor<<< gridDim3, blockDim3 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+   //gemm_64_16x16_3 <<< gridDim3, blockDim3 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
    cudaErrCheck(cudaEventRecord(stopWMMA));
    
    // Now using cuBLAS
