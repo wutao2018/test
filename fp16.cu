@@ -396,7 +396,8 @@ __global__ void gemm_64_16x16_3(int M, int N, int K, float *A, float *B, float *
    
 	int A_offset = block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M;
     //float2 *A_start = (float2*) (A + block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M);
-    *((float2*) (sh_A + 2*threadIdx.x)) = *(float2*)(A + (A_offset%(M*K)));
+     sh_A[2*threadIdx.x] = A[A_offset%(M*K)];
+	 sh_A[2*threadIdx.x] = A[(A_offset+1)%(M*K)];
 
    //load A from global memory to shared memory
    int B_offset =  K*block_base_x + (threadIdx.x/16)*2 + (threadIdx.x%16)*K;
@@ -447,8 +448,9 @@ __global__ void gemm_64_16x16_3(int M, int N, int K, float *A, float *B, float *
            //sh_A[double_buffer+threadIdx.x+64] = A[(A_offset+4*M)%(M*K)];
 		   int A_offset = block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M;
            //float2 *A_start = (float2*) (A + block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M);
-           *((float2*) (sh_A + 2*threadIdx.x)) = *(float2*)(A + (A_offset%(M*K)));
-		   
+			sh_A[double_buffer+2*threadIdx.x] = A[A_offset%(M*K)];
+	        sh_A[double_buffer+2*threadIdx.x+1] = A[(A_offset+1)%(M*K)];
+			
            B_offset += 8;
            sh_B[double_buffer+threadIdx.x*2] = B[B_offset%(K*N)];
            sh_B[double_buffer+threadIdx.x*2+1] = B[(B_offset+1)%(K*N)];
@@ -462,12 +464,12 @@ __global__ void gemm_64_16x16_3(int M, int N, int K, float *A, float *B, float *
    if (blockIdx.x < M/16)
    {
        C[C_offset] = reg_C[0];
-       C_offset = (ind+1)/(PQ)*(PQ*N) + (ind+1)%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*16*(PQ);
-       C[C_offset] = reg_C[1];
-       C_offset = (ind+2)/(PQ)*(PQ*N) + (ind+2)%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*16*(PQ);
-       C[C_offset] = reg_C[2];
-       C_offset = (ind+3)/(PQ)*(PQ*N) + (ind+3)%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*16*(PQ);
-       C[C_offset] = reg_C[3];
+       //C_offset = (ind+1)/(PQ)*(PQ*N) + (ind+1)%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*16*(PQ);
+       C[C_offset+1] = reg_C[1];
+       //C_offset = (ind+2)/(PQ)*(PQ*N) + (ind+2)%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*16*(PQ);
+       C[C_offset+2] = reg_C[2];
+       //C_offset = (ind+3)/(PQ)*(PQ*N) + (ind+3)%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*16*(PQ);
+       C[C_offset+3] = reg_C[3];
    }
    else
    {
