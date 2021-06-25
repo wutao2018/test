@@ -499,6 +499,85 @@ __global__ void fp16gemm_16x16(float *A, float *B, float *C, int M, int N, int K
 }
 
 
+// 64 thread
+__global__ void fp16gemm_16x16_tensor(float *A, float *B, float *C, int M, int N, int K, float alpha, float beta) {
+
+	__shared__ half sh_A[512];
+	__shared__ half sh_B[512];  // 2*16*16
+	
+	int im4 = threadIdx.x & 3;
+	int id4 = threadIdx.x >> 2;
+	//int im8 = threadIdx.x & 7;
+	//int id8 = threadIdx.x >> 3;
+	//int im16 = threadIdx.x & 15;
+	//int id16 = threadIdx.x >> 4;
+	
+	//int thread2 = threadIdx.x << 1;
+	int thread4 = threadIdx.x << 2;
+
+    // Compute block's starting coordinate
+    int block_base_x = blockIdx.y << 4;
+    int block_base_y = blockIdx.x << 4;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    float2 *A_start = (float2*) (A + block_base_y + (im4 << 2) + (id4)*M);
+    *((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
+	*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
+
+    //load B from global memory to shared memory
+	float2 *B_start = (float2*) (B + K*block_base_x + (im4 << 2) + (id4)*K);
+    //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
+    *((half2*) (sh_B + thread4)) = __float22half2_rn(*(B_start));
+	*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
+
+    int double_buffer = 0;
+	
+   // Declare the fragments
+   wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> a_frag;
+   wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> b_frag;
+   wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
+   //wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
+
+   wmma::fill_fragment(acc_frag, 0.0f);
+   
+#pragma unroll
+    for(int k = 0; k < K; k += 16)
+	{
+        __syncthreads();
+		
+		// Load the inputs
+        wmma::load_matrix_sync(a_frag, sh_A + double_buffer, 16);
+        wmma::load_matrix_sync(b_frag, sh_B + double_buffer, 16);
+ 
+        // Perform the matrix multiplication
+        wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);		
+
+        double_buffer ^= 256;  // 16*16
+		
+        if (k + 16 < K)
+		{
+            A_start += M << 3; // half2 --> 8M
+            *((half2*) (sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
+			*((half2*) (sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start+1));
+			
+            B_start += 8;
+            *((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
+			*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start+1));
+        }
+    }
+
+	//int ind = block_base_y + (im4<<2);     // 横、纵坐标  M=HW， K = C， N = K
+	//int PQ = M;
+    //int C_offset = ind/(PQ)*(PQ*N) + ind%(PQ) + (id4 + block_base_x)*(PQ);
+    //*((float2*)(C + C_offset)) = reg_C[0];
+	//*((float2*)(C + C_offset + 2)) = reg_C[1];
+	
+	// Store the output
+    wmma::store_matrix_sync(C + block_base_y + (block_base_x * M), acc_frag, M, wmma::mem_col_major);	
+}
+
+
+
 // 64 thread -- 累积误差
 __global__ void fp16gemm_16x16_accum(float *A, float *B, float *C, int M, int N, int K, float alpha, float beta) {
 
@@ -1767,8 +1846,8 @@ __global__ void gemm_256_128x64_16_2(int M, int N, int K, float *A, float *B, fl
 			*((float4*) (sh_A + double_buffer_A + 8*threadIdx.x + 4)) = *(A_start+1);
 
 			B_start += 8; 
-			*((float2*) (sh_B+ double_buffer_A  + (id64<<8) + 2*im64)) = *(B_start);
-			*((float2*) (sh_B+ double_buffer_A  + (id64<<8) + 2*im64 + 128)) = *(B_start + 1);
+			*((float2*) (sh_B + double_buffer_B + (id64<<8) + 2*im64)) = *(B_start);
+			*((float2*) (sh_B + double_buffer_B + (id64<<8) + 2*im64 + 128)) = *(B_start + 1);
 		}
 	}
 	
@@ -1893,6 +1972,7 @@ __global__ void gemm_256_128x64(int M, int N, int K, float *A, float *B, float *
 		}
 				
 	}
+	
 	C_start -= 16;
     *C_start = reg_C[0];
 	*(C_start + M/4) = reg_C[1];
@@ -2008,17 +2088,18 @@ int main(int argc, char* argv[])
    //convertFp32ToFp16 <<< (MATRIX_K * MATRIX_N + 255) / 256, 256 >>> (b_fp16, b_fp32, MATRIX_K * MATRIX_N);
    // wmma_example <<< gridDim, blockDim >>> (a_fp16, b_fp16, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);   
    // fp16gemm <<< gridDim2, blockDim2 >>> (a_fp16, b_fp16, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
-  // fp16gemm_256<<< gridDim2, blockDim2 >>> (a_fp32, b_fp32, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
-  //fp16gemm_16x16<<< gridDim3, blockDim3 >>>(a_fp32, b_fp32, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
- // gemm_64_16x16_1<<< gridDim3, blockDim3 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
-  // gemm_256_32x32 <<< gridDim2, blockDim2 >>> (MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
-  // verify
-  //gemm_256_64x64_16<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
-  //gemm_256_64x64_16<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
-  //gemm_256_128x128_16<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
-  //gemm_256_64x128_16<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
-  gemm_256_128x64_16_2<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
-  //gemm_256_128x64<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+   // fp16gemm_256<<< gridDim2, blockDim2 >>> (a_fp32, b_fp32, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
+   //fp16gemm_16x16<<< gridDim3, blockDim3 >>>(a_fp32, b_fp32, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
+   fp16gemm_16x16_tensor<<< gridDim3, blockDim3 >>>(a_fp32, b_fp32, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
+   // gemm_64_16x16_1<<< gridDim3, blockDim3 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+   // gemm_256_32x32 <<< gridDim2, blockDim2 >>> (MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+   // verify
+   //gemm_256_64x64_16<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+   //gemm_256_64x64_16<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+   //gemm_256_128x128_16<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+   //gemm_256_64x128_16<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+   //gemm_256_128x64_16_2<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+   //gemm_256_128x64<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
    cudaErrCheck(cudaEventRecord(stopWMMA));
    
    // Now using cuBLAS
