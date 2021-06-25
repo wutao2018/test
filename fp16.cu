@@ -375,123 +375,94 @@ __global__ void gemm_64_16x16_3(int M, int N, int K, float *A, float *B, float *
    __shared__ float sh_B[256];
    //float* sh_B = sh + 2*16*8;
 
-   float reg_C[4];
-   reg_C[0] = 0.f;
-   reg_C[1] = 0.f;
-   reg_C[2] = 0.f;
-   reg_C[3] = 0.f;
+    float4 reg_C;
+	reg_C.x =0.f;
+	reg_C.y =0.f;
+	reg_C.z =0.f;
+	reg_C.w =0.f;
 
-   float reg_A[8]={0.f};
-   float reg_B[2]={0.f};
+    float reg_A[8];
+    float reg_B[2];
 
-   // Compute block's starting coordinate
-   int block_base_x = blockIdx.y*16;
-   int block_base_y = blockIdx.x*16;
+    // Compute block's starting coordinate
+    int block_base_x = blockIdx.y*16;
+    int block_base_y = blockIdx.x*16;
 
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    int aoffset = block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M;
+    sh_A[2*threadIdx.x] = A[aoffset%(M*K)];
+	sh_A[2*threadIdx.x+1] = A[(aoffset+1)%(M*K)];
 
-   //load A from global memory to shared memory
-   //int A_offset = block_base_y + (threadIdx.x%16) + (threadIdx.x/16)*M; // 跟前面的不一样
-   //sh_A[threadIdx.x] = A[A_offset%(M*K)];
-   //sh_A[threadIdx.x+64] = A[(A_offset+4*M)%(M*K)];
-   
-	int A_offset = block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M;
-    //float2 *A_start = (float2*) (A + block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M);
-     sh_A[2*threadIdx.x] = A[A_offset%(M*K)];
-	 sh_A[2*threadIdx.x] = A[(A_offset+1)%(M*K)];
+    //load B from global memory to shared memory
+    int boffset = K*block_base_x + (threadIdx.x/16)*2 + (threadIdx.x%16)*K;
+    sh_B[2*threadIdx.x] = B[boffset%(N*K)];
+	sh_B[2*threadIdx.x+1] = B[(boffset+1)%(N*K)];
 
-   //load A from global memory to shared memory
-   int B_offset =  K*block_base_x + (threadIdx.x/16)*2 + (threadIdx.x%16)*K;
-   sh_B[threadIdx.x*2] = B[B_offset%(K*N)];
-   sh_B[threadIdx.x*2+1] = B[(B_offset+1)%(K*N)];
-
-   int double_buffer = 0;
+    int double_buffer = 0;
 #pragma unroll
-   for(int k=0; k<K; k+=8)
-   {
-       __syncthreads();
-       int shA_offset = double_buffer + (threadIdx.x%4)*4;
-       int shB_offset = double_buffer + ((threadIdx.x/4)*2);
+    for(int k = 0; k < K; k += 8)
+	{
+        __syncthreads();
+        int A_offset = double_buffer + (threadIdx.x%4)*4;
+        int B_offset = double_buffer + ((threadIdx.x/4)*2);	
+		
 #pragma unroll
-       for (int i=0; i<8; i+=2){  // 可以1D register blocking转2D register blocking吗
-
-           reg_A[0] = sh_A[shA_offset];
-           reg_A[1] = sh_A[shA_offset+1];
-           reg_A[2] = sh_A[shA_offset+2];
-           reg_A[3] = sh_A[shA_offset+3];
-           reg_A[4] = sh_A[shA_offset+16];
-           reg_A[5] = sh_A[shA_offset+17];
-           reg_A[6] = sh_A[shA_offset+18];
-           reg_A[7] = sh_A[shA_offset+19];
-
-           reg_B[0] = sh_B[shB_offset];
-           reg_B[1] = sh_B[shB_offset+1];
-
-           reg_C[0] = fma(reg_A[0], reg_B[0], reg_C[0]);
-           reg_C[1] = fma(reg_A[1], reg_B[0], reg_C[1]);
-           reg_C[2] = fma(reg_A[2], reg_B[0], reg_C[2]);
-           reg_C[3] = fma(reg_A[3], reg_B[0], reg_C[3]);
-           reg_C[0] = fma(reg_A[4], reg_B[1], reg_C[0]);
-           reg_C[1] = fma(reg_A[5], reg_B[1], reg_C[1]);
-           reg_C[2] = fma(reg_A[6], reg_B[1], reg_C[2]);
-           reg_C[3] = fma(reg_A[7], reg_B[1], reg_C[3]);
-
-           shA_offset += 32;
-           shB_offset += 32;
-       }
-
-       double_buffer ^= 128;
-
-       if (k + 8 < K)
-	   {
-           A_offset += 8*M;
-           //sh_A[double_buffer+threadIdx.x] = A[A_offset%(M*K)];
-           //sh_A[double_buffer+threadIdx.x+64] = A[(A_offset+4*M)%(M*K)];
-		   int A_offset = block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M;
-           //float2 *A_start = (float2*) (A + block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M);
-			sh_A[double_buffer+2*threadIdx.x] = A[A_offset%(M*K)];
-	        sh_A[double_buffer+2*threadIdx.x+1] = A[(A_offset+1)%(M*K)];
+        for (int i=0; i<8; i+=2)   // 全部展开有register spill吗
+		{
+            reg_A[0] = sh_A[A_offset];    // A_offset+0 ~ A_offset+3 为什么不用向量呢
+            reg_A[1] = sh_A[A_offset+1];  // 为了避免bank冲突, 这8个寄存器都不是连续的【4个就不会重复】，因此不能使用向量传输指令
+            reg_A[2] = sh_A[A_offset+2];
+            reg_A[3] = sh_A[A_offset+3];
+			reg_A[4] = sh_A[A_offset+16];
+            reg_A[5] = sh_A[A_offset+17];
+            reg_A[6] = sh_A[A_offset+18];
+            reg_A[7] = sh_A[A_offset+19];
 			
-           B_offset += 8;
-           sh_B[double_buffer+threadIdx.x*2] = B[B_offset%(K*N)];
-           sh_B[double_buffer+threadIdx.x*2+1] = B[(B_offset+1)%(K*N)];
-       }
-   }
+			reg_B[0] = sh_B[B_offset];
+			
+            reg_C.x = fma(reg_A[0], reg_B[0], reg_C.x); // reg_C.x = reg_A[0]*reg_B[0] + reg_A[4]*reg_B[1]
+            reg_C.y = fma(reg_A[1], reg_B[0], reg_C.y);
+            reg_C.z = fma(reg_A[2], reg_B[0], reg_C.z);
+            reg_C.w = fma(reg_A[3], reg_B[0], reg_C.w);
+			
+			reg_B[1] = sh_B[B_offset+1];
+			
+            reg_C.x = fma(reg_A[4], reg_B[1], reg_C.x);
+            reg_C.y = fma(reg_A[5], reg_B[1], reg_C.y);
+            reg_C.z = fma(reg_A[6], reg_B[1], reg_C.z);
+            reg_C.w = fma(reg_A[7], reg_B[1], reg_C.w);
 
-	int ind = blockIdx.x*16 + (threadIdx.x%4)*4;
-	int PQ = M; 
-    int C_offset = ind/(PQ)*(PQ*N) + ind%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*16*(PQ);
+            A_offset += 32;
+            B_offset += 32;
+        }
+		
+        double_buffer ^= 128;
+		
+        if (k + 8 < K)
+		{
+            aoffset += 8*M; // float2 --> 8M
+            //*((float2*) (sh_A + double_buffer + 2*threadIdx.x)) = *(A_start);
+            boffset += 8;
+            //*((float2*) (sh_B + double_buffer + 2*threadIdx.x)) = *(B_start);
+			
+			//int aoffset = block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M;
+			sh_A[double_buffer+2*threadIdx.x] = A[aoffset%(M*K)];
+			sh_A[double_buffer+2*threadIdx.x+1] = A[(aoffset+1)%(M*K)];
 
-   if (blockIdx.x < M/16)
-   {
-       C[C_offset] = reg_C[0];
-       //C_offset = (ind+1)/(PQ)*(PQ*N) + (ind+1)%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*16*(PQ);
-       C[C_offset+1] = reg_C[1];
-       //C_offset = (ind+2)/(PQ)*(PQ*N) + (ind+2)%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*16*(PQ);
-       C[C_offset+2] = reg_C[2];
-       //C_offset = (ind+3)/(PQ)*(PQ*N) + (ind+3)%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*16*(PQ);
-       C[C_offset+3] = reg_C[3];
-   }
-   else
-   {
-       int ruler = (threadIdx.x%4)*4;
-       int rag = M%16;
-	   
-       if ((ruler) < rag){
-           C[C_offset] = reg_C[0];
-		}
-       if ((ruler+1)<rag){
-     		C_offset = (ind+1)/(PQ)*(PQ*N) + (ind+1)%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*16*(PQ);
-           C[C_offset] = reg_C[1];
-		}
-       if ((ruler+2)<rag){
-     	C_offset = (ind+2)/(PQ)*(PQ*N) + (ind+2)%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*16*(PQ);
-           C[C_offset] = reg_C[2];
-		}
-       if ((ruler+3)<rag){
-     		C_offset = (ind+3)/(PQ)*(PQ*N) + (ind+3)%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*16*(PQ);
-           C[C_offset] = reg_C[3];
-		}
-   }
+			//load B from global memory to shared memory
+			//int boffset = K*block_base_x + (threadIdx.x/16)*2 + (threadIdx.x%16)*K;
+			sh_B[double_buffer+2*threadIdx.x] = B[boffset%(N*K)];
+			sh_B[double_buffer+2*threadIdx.x+1] = B[(boffset+1)%(N*K)];
+        }
+    }
+
+	int ind = blockIdx.x*16 + (threadIdx.x%4)*4;  // 横、纵坐标  M=HW， K = C， N = K
+	// blockIdx.x*16 < (M + (0)*16) ;  M%16 == 0 && P%2 == 0 ;   relu = max(0, x)
+    int C_offset = ind/(P*Q)*(P*Q*N) + ind%(P*Q) + (threadIdx.x/4)*(P*Q) + blockIdx.y*16*(P*Q);
+    C[C_offset] = reg_C.x > 0 ? reg_C.x : 0;
+    C[C_offset+1] = reg_C.y;
+    C[C_offset+2] = reg_C.z;
+    C[C_offset+3] = reg_C.w;
 }
 
 int main(int argc, char* argv[]) 
