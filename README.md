@@ -10,6 +10,14 @@
 
 #include <mma.h>
 
+#include <mma.h>
+using namespace nvcuda;
+
+// The only dimensions currently supported by WMMA
+const int WMMA_M = 16;
+const int WMMA_N = 16;
+const int WMMA_K = 16;
+
 //(N*P*Q)%16==0 && (P*Q)%4==0
 __device__ void gemm_64_16x16_1(int M, int N, int K, int P, int Q, float *A, float *B, float *C, float *sh){
 
