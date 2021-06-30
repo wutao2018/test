@@ -1,0 +1,421 @@
+==PROF== Connected to process 7003 (/home/twu/batched_gemm/google-net_cudnn/google-net_cudnn)
+==PROF== Profiling "1:7:gemm_4:10": 0%....50%....100% - 6 passes
+==PROF== Profiling "1:7:gemm_4:11": 0%....50%....100% - 6 passes
+==PROF== Profiling "1:7:gemm_4:12": 0%....50%....100% - 6 passes
+==PROF== Profiling "1:7:gemm_4:13": 0%....50%....100% - 6 passes
+==PROF== Profiling "1:7:gemm_4:14": 0%....50%....100% - 6 passes
+==PROF== Profiling "1:7:gemm_4:15": 0%....50%....100% - 6 passes
+==PROF== Profiling "1:7:gemm_4:16": 0%....50%....100% - 6 passes
+==PROF== Profiling "1:7:gemm_4:17": 0%....50%....100% - 6 passes
+==PROF== Profiling "1:7:gemm_4:18": 0%....50%....100% - 6 passes
+==PROF== Profiling "1:7:gemm_4_2:10": 0%....50%....100% - 6 passes
+==PROF== Profiling "1:7:gemm_4_2:11": 0%....50%....100% - 6 passes
+==PROF== Profiling "1:7:gemm_4_2:12": 0%....50%....100% - 6 passes
+==PROF== Profiling "1:7:gemm_4_2:13": 0%....50%....100% - 6 passes
+==PROF== Profiling "1:7:gemm_4_2:14": 0%....50%....100% - 6 passes
+==PROF== Profiling "1:7:gemm_4_2:15": 0%....50%....100% - 6 passes
+==PROF== Profiling "1:7:gemm_4_2:16": 0%....50%....100% - 6 passes
+==PROF== Profiling "1:7:gemm_4_2:17": 0%....50%....100% - 6 passes
+==PROF== Profiling "1:7:gemm_4_2:18": 0%....50%....100%Time for cuDNN implementation is 10.614688
+Time for batched-Conv implementation is 9.626752
+Time for batched-Conv with Tensor implementation is 8.593456
+result is correctly! 
+ - 6 passes
+==PROF== Disconnected from process 7003
+[7003] google-net_cudnn@127.0.0.1
+  gemm_4(int, int, int, int, int, int, int, int, float*, float*, float*, float*, float*, float*, float*, float*, float*, float*), 2021-Jun-30 17:01:26, Context 1, Stream 7
+    Section: Command line profiler metrics
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    dram__throughput.avg.pct_of_peak_sustained_elapsed                                   %                           2.98
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio    sector/request                          11.93
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_st.ratio    sector/request                             16
+    l1tex__data_pipe_lsu_wavefronts_mem_shared.avg.pct_of_peak_sustained_e               %                          19.44
+    lapsed                                                                                                               
+    l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second                   Gbyte/second                         301.98
+    l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second                   Gbyte/second                          33.76
+    lts__t_sectors.avg.pct_of_peak_sustained_elapsed                                     %                           9.71
+    sm__warps_active.avg.pct_of_peak_sustained_active                                    %                          42.51
+    smsp__cycles_active.avg.pct_of_peak_sustained_elapsed                                %                          71.04
+    smsp__pipe_fma_cycles_active.avg.pct_of_peak_sustained_active                        %                          11.38
+    smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct                        %                          66.67
+    smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_               %                           6.96
+    peak_sustained_elapsed                                                                                               
+    smsp__sass_thread_inst_executed_ops_hadd_hmul_hfma_pred_on.avg.pct_of_               %                              0
+    peak_sustained_elapsed                                                                                               
+    smsp__warps_eligible.sum.per_cycle_active                                         warp                          80.93
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  gemm_4(int, int, int, int, int, int, int, int, float*, float*, float*, float*, float*, float*, float*, float*, float*, float*), 2021-Jun-30 17:01:26, Context 1, Stream 7
+    Section: Command line profiler metrics
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    dram__throughput.avg.pct_of_peak_sustained_elapsed                                   %                           3.42
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio    sector/request                          11.93
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_st.ratio    sector/request                          16.00
+    l1tex__data_pipe_lsu_wavefronts_mem_shared.avg.pct_of_peak_sustained_e               %                          23.01
+    lapsed                                                                                                               
+    l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second                   Gbyte/second                         356.82
+    l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second                   Gbyte/second                          29.92
+    lts__t_sectors.avg.pct_of_peak_sustained_elapsed                                     %                          11.78
+    sm__warps_active.avg.pct_of_peak_sustained_active                                    %                          61.13
+    smsp__cycles_active.avg.pct_of_peak_sustained_elapsed                                %                          82.50
+    smsp__pipe_fma_cycles_active.avg.pct_of_peak_sustained_active                        %                          11.42
+    smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct                        %                          66.67
+    smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_               %                           8.25
+    peak_sustained_elapsed                                                                                               
+    smsp__sass_thread_inst_executed_ops_hadd_hmul_hfma_pred_on.avg.pct_of_               %                              0
+    peak_sustained_elapsed                                                                                               
+    smsp__warps_eligible.sum.per_cycle_active                                         warp                         106.15
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  gemm_4(int, int, int, int, int, int, int, int, float*, float*, float*, float*, float*, float*, float*, float*, float*, float*), 2021-Jun-30 17:01:26, Context 1, Stream 7
+    Section: Command line profiler metrics
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    dram__throughput.avg.pct_of_peak_sustained_elapsed                                   %                           3.52
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio    sector/request                          10.39
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_st.ratio    sector/request                          19.08
+    l1tex__data_pipe_lsu_wavefronts_mem_shared.avg.pct_of_peak_sustained_e               %                          18.36
+    lapsed                                                                                                               
+    l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second                   Gbyte/second                         463.55
+    l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second                   Gbyte/second                          14.18
+    lts__t_sectors.avg.pct_of_peak_sustained_elapsed                                     %                           9.29
+    sm__warps_active.avg.pct_of_peak_sustained_active                                    %                          25.92
+    smsp__cycles_active.avg.pct_of_peak_sustained_elapsed                                %                          70.47
+    smsp__pipe_fma_cycles_active.avg.pct_of_peak_sustained_active                        %                          19.42
+    smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct                        %                          38.10
+    smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_               %                           6.31
+    peak_sustained_elapsed                                                                                               
+    smsp__sass_thread_inst_executed_ops_hadd_hmul_hfma_pred_on.avg.pct_of_               %                              0
+    peak_sustained_elapsed                                                                                               
+    smsp__warps_eligible.sum.per_cycle_active                                         warp                          83.25
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  gemm_4(int, int, int, int, int, int, int, int, float*, float*, float*, float*, float*, float*, float*, float*, float*, float*), 2021-Jun-30 17:01:26, Context 1, Stream 7
+    Section: Command line profiler metrics
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    dram__throughput.avg.pct_of_peak_sustained_elapsed                                   %                           3.53
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio    sector/request                          10.40
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_st.ratio    sector/request                          19.08
+    l1tex__data_pipe_lsu_wavefronts_mem_shared.avg.pct_of_peak_sustained_e               %                          19.01
+    lapsed                                                                                                               
+    l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second                   Gbyte/second                         483.58
+    l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second                   Gbyte/second                          13.85
+    lts__t_sectors.avg.pct_of_peak_sustained_elapsed                                     %                          10.01
+    sm__warps_active.avg.pct_of_peak_sustained_active                                    %                          26.27
+    smsp__cycles_active.avg.pct_of_peak_sustained_elapsed                                %                          72.41
+    smsp__pipe_fma_cycles_active.avg.pct_of_peak_sustained_active                        %                          19.54
+    smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct                        %                          38.10
+    smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_               %                           6.54
+    peak_sustained_elapsed                                                                                               
+    smsp__sass_thread_inst_executed_ops_hadd_hmul_hfma_pred_on.avg.pct_of_               %                              0
+    peak_sustained_elapsed                                                                                               
+    smsp__warps_eligible.sum.per_cycle_active                                         warp                          86.81
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  gemm_4(int, int, int, int, int, int, int, int, float*, float*, float*, float*, float*, float*, float*, float*, float*, float*), 2021-Jun-30 17:01:26, Context 1, Stream 7
+    Section: Command line profiler metrics
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    dram__throughput.avg.pct_of_peak_sustained_elapsed                                   %                           3.38
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio    sector/request                          10.41
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_st.ratio    sector/request                          19.08
+    l1tex__data_pipe_lsu_wavefronts_mem_shared.avg.pct_of_peak_sustained_e               %                          17.39
+    lapsed                                                                                                               
+    l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second                   Gbyte/second                         451.81
+    l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second                   Gbyte/second                          12.94
+    lts__t_sectors.avg.pct_of_peak_sustained_elapsed                                     %                           8.96
+    sm__warps_active.avg.pct_of_peak_sustained_active                                    %                          26.23
+    smsp__cycles_active.avg.pct_of_peak_sustained_elapsed                                %                          69.11
+    smsp__pipe_fma_cycles_active.avg.pct_of_peak_sustained_active                        %                          18.75
+    smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct                        %                          38.10
+    smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_               %                           5.98
+    peak_sustained_elapsed                                                                                               
+    smsp__sass_thread_inst_executed_ops_hadd_hmul_hfma_pred_on.avg.pct_of_               %                              0
+    peak_sustained_elapsed                                                                                               
+    smsp__warps_eligible.sum.per_cycle_active                                         warp                          84.03
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  gemm_4(int, int, int, int, int, int, int, int, float*, float*, float*, float*, float*, float*, float*, float*, float*, float*), 2021-Jun-30 17:01:26, Context 1, Stream 7
+    Section: Command line profiler metrics
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    dram__throughput.avg.pct_of_peak_sustained_elapsed                                   %                           3.22
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio    sector/request                          10.42
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_st.ratio    sector/request                          19.08
+    l1tex__data_pipe_lsu_wavefronts_mem_shared.avg.pct_of_peak_sustained_e               %                          16.40
+    lapsed                                                                                                               
+    l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second                   Gbyte/second                         399.88
+    l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second                   Gbyte/second                          11.44
+    lts__t_sectors.avg.pct_of_peak_sustained_elapsed                                     %                           8.68
+    sm__warps_active.avg.pct_of_peak_sustained_active                                    %                          26.60
+    smsp__cycles_active.avg.pct_of_peak_sustained_elapsed                                %                          61.59
+    smsp__pipe_fma_cycles_active.avg.pct_of_peak_sustained_active                        %                          19.87
+    smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct                        %                          38.10
+    smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_               %                           5.64
+    peak_sustained_elapsed                                                                                               
+    smsp__sass_thread_inst_executed_ops_hadd_hmul_hfma_pred_on.avg.pct_of_               %                              0
+    peak_sustained_elapsed                                                                                               
+    smsp__warps_eligible.sum.per_cycle_active                                         warp                          92.91
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  gemm_4(int, int, int, int, int, int, int, int, float*, float*, float*, float*, float*, float*, float*, float*, float*, float*), 2021-Jun-30 17:01:26, Context 1, Stream 7
+    Section: Command line profiler metrics
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    dram__throughput.avg.pct_of_peak_sustained_elapsed                                   %                           3.53
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio    sector/request                          10.23
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_st.ratio    sector/request                          19.08
+    l1tex__data_pipe_lsu_wavefronts_mem_shared.avg.pct_of_peak_sustained_e               %                          23.37
+    lapsed                                                                                                               
+    l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second                   Gbyte/second                         543.51
+    l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second                   Gbyte/second                          15.35
+    lts__t_sectors.avg.pct_of_peak_sustained_elapsed                                     %                          12.08
+    sm__warps_active.avg.pct_of_peak_sustained_active                                    %                          35.33
+    smsp__cycles_active.avg.pct_of_peak_sustained_elapsed                                %                          76.21
+    smsp__pipe_fma_cycles_active.avg.pct_of_peak_sustained_active                        %                          22.81
+    smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct                        %                          38.10
+    smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_               %                           8.04
+    peak_sustained_elapsed                                                                                               
+    smsp__sass_thread_inst_executed_ops_hadd_hmul_hfma_pred_on.avg.pct_of_               %                              0
+    peak_sustained_elapsed                                                                                               
+    smsp__warps_eligible.sum.per_cycle_active                                         warp                         121.09
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  gemm_4(int, int, int, int, int, int, int, int, float*, float*, float*, float*, float*, float*, float*, float*, float*, float*), 2021-Jun-30 17:01:27, Context 1, Stream 7
+    Section: Command line profiler metrics
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    dram__throughput.avg.pct_of_peak_sustained_elapsed                                   %                           4.54
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio    sector/request                          10.82
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_st.ratio    sector/request                          19.08
+    l1tex__data_pipe_lsu_wavefronts_mem_shared.avg.pct_of_peak_sustained_e               %                          14.32
+    lapsed                                                                                                               
+    l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second                   Gbyte/second                         379.77
+    l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second                   Gbyte/second                           5.23
+    lts__t_sectors.avg.pct_of_peak_sustained_elapsed                                     %                           7.38
+    sm__warps_active.avg.pct_of_peak_sustained_active                                    %                          14.48
+    smsp__cycles_active.avg.pct_of_peak_sustained_elapsed                                %                          64.94
+    smsp__pipe_fma_cycles_active.avg.pct_of_peak_sustained_active                        %                          16.29
+    smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct                        %                          36.78
+    smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_               %                           4.93
+    peak_sustained_elapsed                                                                                               
+    smsp__sass_thread_inst_executed_ops_hadd_hmul_hfma_pred_on.avg.pct_of_               %                              0
+    peak_sustained_elapsed                                                                                               
+    smsp__warps_eligible.sum.per_cycle_active                                         warp                          60.80
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  gemm_4(int, int, int, int, int, int, int, int, float*, float*, float*, float*, float*, float*, float*, float*, float*, float*), 2021-Jun-30 17:01:27, Context 1, Stream 7
+    Section: Command line profiler metrics
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    dram__throughput.avg.pct_of_peak_sustained_elapsed                                   %                           4.63
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio    sector/request                          10.82
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_st.ratio    sector/request                          19.08
+    l1tex__data_pipe_lsu_wavefronts_mem_shared.avg.pct_of_peak_sustained_e               %                          15.18
+    lapsed                                                                                                               
+    l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second                   Gbyte/second                         400.83
+    l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second                   Gbyte/second                           5.52
+    lts__t_sectors.avg.pct_of_peak_sustained_elapsed                                     %                           7.45
+    sm__warps_active.avg.pct_of_peak_sustained_active                                    %                          17.35
+    smsp__cycles_active.avg.pct_of_peak_sustained_elapsed                                %                          62.75
+    smsp__pipe_fma_cycles_active.avg.pct_of_peak_sustained_active                        %                          17.85
+    smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct                        %                          36.78
+    smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_               %                           5.22
+    peak_sustained_elapsed                                                                                               
+    smsp__sass_thread_inst_executed_ops_hadd_hmul_hfma_pred_on.avg.pct_of_               %                              0
+    peak_sustained_elapsed                                                                                               
+    smsp__warps_eligible.sum.per_cycle_active                                         warp                          70.28
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  gemm_4_2(int, int, int, int, int, int, int, int, float*, float*, float*, float*, float*, float*, float*, float*, float*, float*), 2021-Jun-30 17:01:27, Context 1, Stream 7
+    Section: Command line profiler metrics
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    dram__throughput.avg.pct_of_peak_sustained_elapsed                                   %                           3.52
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio    sector/request                          11.91
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_st.ratio    sector/request                             16
+    l1tex__data_pipe_lsu_wavefronts_mem_shared.avg.pct_of_peak_sustained_e               %                          14.07
+    lapsed                                                                                                               
+    l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second                   Gbyte/second                         397.75
+    l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second                   Gbyte/second                          22.27
+    lts__t_sectors.avg.pct_of_peak_sustained_elapsed                                     %                          13.38
+    sm__warps_active.avg.pct_of_peak_sustained_active                                    %                          44.78
+    smsp__cycles_active.avg.pct_of_peak_sustained_elapsed                                %                          78.70
+    smsp__pipe_fma_cycles_active.avg.pct_of_peak_sustained_active                        %                           4.28
+    smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct                        %                          68.12
+    smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_               %                              0
+    peak_sustained_elapsed                                                                                               
+    smsp__sass_thread_inst_executed_ops_hadd_hmul_hfma_pred_on.avg.pct_of_               %                          14.87
+    peak_sustained_elapsed                                                                                               
+    smsp__warps_eligible.sum.per_cycle_active                                         warp                         129.32
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  gemm_4_2(int, int, int, int, int, int, int, int, float*, float*, float*, float*, float*, float*, float*, float*, float*, float*), 2021-Jun-30 17:01:27, Context 1, Stream 7
+    Section: Command line profiler metrics
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    dram__throughput.avg.pct_of_peak_sustained_elapsed                                   %                           4.07
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio    sector/request                          11.89
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_st.ratio    sector/request                             16
+    l1tex__data_pipe_lsu_wavefronts_mem_shared.avg.pct_of_peak_sustained_e               %                          15.88
+    lapsed                                                                                                               
+    l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second                   Gbyte/second                         464.06
+    l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second                   Gbyte/second                          19.51
+    lts__t_sectors.avg.pct_of_peak_sustained_elapsed                                     %                          15.85
+    sm__warps_active.avg.pct_of_peak_sustained_active                                    %                          64.43
+    smsp__cycles_active.avg.pct_of_peak_sustained_elapsed                                %                          86.89
+    smsp__pipe_fma_cycles_active.avg.pct_of_peak_sustained_active                        %                           4.18
+    smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct                        %                          68.22
+    smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_               %                              0
+    peak_sustained_elapsed                                                                                               
+    smsp__sass_thread_inst_executed_ops_hadd_hmul_hfma_pred_on.avg.pct_of_               %                          16.83
+    peak_sustained_elapsed                                                                                               
+    smsp__warps_eligible.sum.per_cycle_active                                         warp                         161.14
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  gemm_4_2(int, int, int, int, int, int, int, int, float*, float*, float*, float*, float*, float*, float*, float*, float*, float*), 2021-Jun-30 17:01:27, Context 1, Stream 7
+    Section: Command line profiler metrics
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    dram__throughput.avg.pct_of_peak_sustained_elapsed                                   %                           4.23
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio    sector/request                          11.78
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_st.ratio    sector/request                          19.76
+    l1tex__data_pipe_lsu_wavefronts_mem_shared.avg.pct_of_peak_sustained_e               %                          11.68
+    lapsed                                                                                                               
+    l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second                   Gbyte/second                         479.63
+    l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second                   Gbyte/second                          17.28
+    lts__t_sectors.avg.pct_of_peak_sustained_elapsed                                     %                          11.06
+    sm__warps_active.avg.pct_of_peak_sustained_active                                    %                          27.35
+    smsp__cycles_active.avg.pct_of_peak_sustained_elapsed                                %                          88.69
+    smsp__pipe_fma_cycles_active.avg.pct_of_peak_sustained_active                        %                           3.29
+    smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct                        %                          44.36
+    smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_               %                              0
+    peak_sustained_elapsed                                                                                               
+    smsp__sass_thread_inst_executed_ops_hadd_hmul_hfma_pred_on.avg.pct_of_               %                          11.93
+    peak_sustained_elapsed                                                                                               
+    smsp__warps_eligible.sum.per_cycle_active                                         warp                          65.95
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  gemm_4_2(int, int, int, int, int, int, int, int, float*, float*, float*, float*, float*, float*, float*, float*, float*, float*), 2021-Jun-30 17:01:27, Context 1, Stream 7
+    Section: Command line profiler metrics
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    dram__throughput.avg.pct_of_peak_sustained_elapsed                                   %                           4.25
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio    sector/request                          11.78
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_st.ratio    sector/request                          19.76
+    l1tex__data_pipe_lsu_wavefronts_mem_shared.avg.pct_of_peak_sustained_e               %                          11.97
+    lapsed                                                                                                               
+    l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second                   Gbyte/second                         501.17
+    l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second                   Gbyte/second                          16.93
+    lts__t_sectors.avg.pct_of_peak_sustained_elapsed                                     %                          11.34
+    sm__warps_active.avg.pct_of_peak_sustained_active                                    %                          28.43
+    smsp__cycles_active.avg.pct_of_peak_sustained_elapsed                                %                          87.30
+    smsp__pipe_fma_cycles_active.avg.pct_of_peak_sustained_active                        %                           3.41
+    smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct                        %                          44.36
+    smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_               %                              0
+    peak_sustained_elapsed                                                                                               
+    smsp__sass_thread_inst_executed_ops_hadd_hmul_hfma_pred_on.avg.pct_of_               %                          12.22
+    peak_sustained_elapsed                                                                                               
+    smsp__warps_eligible.sum.per_cycle_active                                         warp                          70.84
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  gemm_4_2(int, int, int, int, int, int, int, int, float*, float*, float*, float*, float*, float*, float*, float*, float*, float*), 2021-Jun-30 17:01:27, Context 1, Stream 7
+    Section: Command line profiler metrics
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    dram__throughput.avg.pct_of_peak_sustained_elapsed                                   %                           4.12
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio    sector/request                          11.79
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_st.ratio    sector/request                          19.76
+    l1tex__data_pipe_lsu_wavefronts_mem_shared.avg.pct_of_peak_sustained_e               %                          10.78
+    lapsed                                                                                                               
+    l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second                   Gbyte/second                         449.39
+    l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second                   Gbyte/second                          15.17
+    lts__t_sectors.avg.pct_of_peak_sustained_elapsed                                     %                           9.88
+    sm__warps_active.avg.pct_of_peak_sustained_active                                    %                          27.39
+    smsp__cycles_active.avg.pct_of_peak_sustained_elapsed                                %                          82.84
+    smsp__pipe_fma_cycles_active.avg.pct_of_peak_sustained_active                        %                           3.25
+    smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct                        %                          44.36
+    smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_               %                              0
+    peak_sustained_elapsed                                                                                               
+    smsp__sass_thread_inst_executed_ops_hadd_hmul_hfma_pred_on.avg.pct_of_               %                          11.00
+    peak_sustained_elapsed                                                                                               
+    smsp__warps_eligible.sum.per_cycle_active                                         warp                          67.30
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  gemm_4_2(int, int, int, int, int, int, int, int, float*, float*, float*, float*, float*, float*, float*, float*, float*, float*), 2021-Jun-30 17:01:27, Context 1, Stream 7
+    Section: Command line profiler metrics
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    dram__throughput.avg.pct_of_peak_sustained_elapsed                                   %                           3.70
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio    sector/request                          11.80
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_st.ratio    sector/request                          19.76
+    l1tex__data_pipe_lsu_wavefronts_mem_shared.avg.pct_of_peak_sustained_e               %                           9.72
+    lapsed                                                                                                               
+    l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second                   Gbyte/second                         403.03
+    l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second                   Gbyte/second                          13.59
+    lts__t_sectors.avg.pct_of_peak_sustained_elapsed                                     %                           8.69
+    sm__warps_active.avg.pct_of_peak_sustained_active                                    %                          27.10
+    smsp__cycles_active.avg.pct_of_peak_sustained_elapsed                                %                          70.30
+    smsp__pipe_fma_cycles_active.avg.pct_of_peak_sustained_active                        %                           3.47
+    smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct                        %                          44.36
+    smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_               %                              0
+    peak_sustained_elapsed                                                                                               
+    smsp__sass_thread_inst_executed_ops_hadd_hmul_hfma_pred_on.avg.pct_of_               %                           9.92
+    peak_sustained_elapsed                                                                                               
+    smsp__warps_eligible.sum.per_cycle_active                                         warp                          74.66
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  gemm_4_2(int, int, int, int, int, int, int, int, float*, float*, float*, float*, float*, float*, float*, float*, float*, float*), 2021-Jun-30 17:01:28, Context 1, Stream 7
+    Section: Command line profiler metrics
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    dram__throughput.avg.pct_of_peak_sustained_elapsed                                   %                           3.74
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio    sector/request                          11.55
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_st.ratio    sector/request                          19.76
+    l1tex__data_pipe_lsu_wavefronts_mem_shared.avg.pct_of_peak_sustained_e               %                          13.64
+    lapsed                                                                                                               
+    l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second                   Gbyte/second                         509.00
+    l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second                   Gbyte/second                          17.01
+    lts__t_sectors.avg.pct_of_peak_sustained_elapsed                                     %                          12.60
+    sm__warps_active.avg.pct_of_peak_sustained_active                                    %                          37.32
+    smsp__cycles_active.avg.pct_of_peak_sustained_elapsed                                %                          77.23
+    smsp__pipe_fma_cycles_active.avg.pct_of_peak_sustained_active                        %                           4.39
+    smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct                        %                          44.36
+    smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_               %                              0
+    peak_sustained_elapsed                                                                                               
+    smsp__sass_thread_inst_executed_ops_hadd_hmul_hfma_pred_on.avg.pct_of_               %                          13.93
+    peak_sustained_elapsed                                                                                               
+    smsp__warps_eligible.sum.per_cycle_active                                         warp                         105.33
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  gemm_4_2(int, int, int, int, int, int, int, int, float*, float*, float*, float*, float*, float*, float*, float*, float*, float*), 2021-Jun-30 17:01:28, Context 1, Stream 7
+    Section: Command line profiler metrics
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    dram__throughput.avg.pct_of_peak_sustained_elapsed                                   %                           4.45
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio    sector/request                          12.15
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_st.ratio    sector/request                          19.08
+    l1tex__data_pipe_lsu_wavefronts_mem_shared.avg.pct_of_peak_sustained_e               %                           6.91
+    lapsed                                                                                                               
+    l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second                   Gbyte/second                         273.11
+    l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second                   Gbyte/second                           4.87
+    lts__t_sectors.avg.pct_of_peak_sustained_elapsed                                     %                           6.12
+    sm__warps_active.avg.pct_of_peak_sustained_active                                    %                          14.16
+    smsp__cycles_active.avg.pct_of_peak_sustained_elapsed                                %                          83.00
+    smsp__pipe_fma_cycles_active.avg.pct_of_peak_sustained_active                        %                           2.02
+    smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct                        %                          42.16
+    smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_               %                              0
+    peak_sustained_elapsed                                                                                               
+    smsp__sass_thread_inst_executed_ops_hadd_hmul_hfma_pred_on.avg.pct_of_               %                           7.05
+    peak_sustained_elapsed                                                                                               
+    smsp__warps_eligible.sum.per_cycle_active                                         warp                          38.98
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
+  gemm_4_2(int, int, int, int, int, int, int, int, float*, float*, float*, float*, float*, float*, float*, float*, float*, float*), 2021-Jun-30 17:01:28, Context 1, Stream 7
+    Section: Command line profiler metrics
+    ---------------------------------------------------------------------- --------------- ------------------------------
+    dram__throughput.avg.pct_of_peak_sustained_elapsed                                   %                           5.08
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_ld.ratio    sector/request                          12.14
+    l1tex__average_t_sectors_per_request_pipe_lsu_mem_global_op_st.ratio    sector/request                          19.08
+    l1tex__data_pipe_lsu_wavefronts_mem_shared.avg.pct_of_peak_sustained_e               %                           8.53
+    lapsed                                                                                                               
+    l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second                   Gbyte/second                         341.14
+    l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second                   Gbyte/second                           6.09
+    lts__t_sectors.avg.pct_of_peak_sustained_elapsed                                     %                           7.15
+    sm__warps_active.avg.pct_of_peak_sustained_active                                    %                          17.23
+    smsp__cycles_active.avg.pct_of_peak_sustained_elapsed                                %                          89.65
+    smsp__pipe_fma_cycles_active.avg.pct_of_peak_sustained_active                        %                           2.31
+    smsp__sass_average_data_bytes_per_sector_mem_global_op_ld.pct                        %                          42.16
+    smsp__sass_thread_inst_executed_ops_fadd_fmul_ffma_pred_on.avg.pct_of_               %                              0
+    peak_sustained_elapsed                                                                                               
+    smsp__sass_thread_inst_executed_ops_hadd_hmul_hfma_pred_on.avg.pct_of_               %                           8.72
+    peak_sustained_elapsed                                                                                               
+    smsp__warps_eligible.sum.per_cycle_active                                         warp                          45.61
+    ---------------------------------------------------------------------- --------------- ------------------------------
+
