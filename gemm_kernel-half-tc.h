@@ -103,6 +103,87 @@ __device__ void gemm_64_16x16_1(int M, int N, int K, int P, int Q, float *A, flo
     C[C_offset+3] = reg_C.w;
 }
 
+// 8x8 gemm with 64 thread
+__device__ void gemm_64_8x8_1(int M, int N, int K, int P, int Q, float *A, float *B, float *C, float *sh){
+
+	float* sh_A = sh;
+    float* sh_B = sh + 2*8*8;
+
+    float reg_C = 0.f;
+
+    float reg_A[8];
+    float reg_B[2];
+
+    // Compute block's starting coordinate
+    int block_base_x = blockIdx.y*8;
+    int block_base_y = blockIdx.x*8;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    float2 *A_start = (float2*) (A + block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M);
+    *((float2*) (sh_A + 2*threadIdx.x)) = *(A_start);
+
+    //load B from global memory to shared memory
+    float2 *B_start = (float2*) (B + K*block_base_x + (threadIdx.x/16)*2 + (threadIdx.x%16)*K);
+    *((float2*) (sh_B + 2*threadIdx.x)) = *(B_start);
+
+    int double_buffer = 0;
+#pragma unroll
+    for(int k = 0; k < K; k += 8)
+	{
+        __syncthreads();
+        int A_offset = double_buffer + (threadIdx.x%4)*4;
+        int B_offset = double_buffer + ((threadIdx.x/4)*2);	
+		
+#pragma unroll
+        for (int i=0; i<8; i+=2)   // 全部展开有register spill吗
+		{
+            reg_A[0] = sh_A[A_offset];    // A_offset+0 ~ A_offset+3 为什么不用向量呢
+            reg_A[1] = sh_A[A_offset+1];  // 为了避免bank冲突, 这8个寄存器都不是连续的【4个就不会重复】，因此不能使用向量传输指令
+            reg_A[2] = sh_A[A_offset+2];
+            reg_A[3] = sh_A[A_offset+3];
+			reg_A[4] = sh_A[A_offset+16];
+            reg_A[5] = sh_A[A_offset+17];
+            reg_A[6] = sh_A[A_offset+18];
+            reg_A[7] = sh_A[A_offset+19];
+			
+			reg_B[0] = sh_B[B_offset];
+			
+            reg_C.x = fma(reg_A[0], reg_B[0], reg_C.x); // reg_C.x = reg_A[0]*reg_B[0] + reg_A[4]*reg_B[1]
+            reg_C.y = fma(reg_A[1], reg_B[0], reg_C.y);
+            reg_C.z = fma(reg_A[2], reg_B[0], reg_C.z);
+            reg_C.w = fma(reg_A[3], reg_B[0], reg_C.w);
+			
+			reg_B[1] = sh_B[B_offset+1];
+			
+            reg_C.x = fma(reg_A[4], reg_B[1], reg_C.x);
+            reg_C.y = fma(reg_A[5], reg_B[1], reg_C.y);
+            reg_C.z = fma(reg_A[6], reg_B[1], reg_C.z);
+            reg_C.w = fma(reg_A[7], reg_B[1], reg_C.w);
+
+            A_offset += 32;
+            B_offset += 32;
+        }
+		
+        double_buffer ^= 128;
+		
+        if (k + 8 < K)
+		{
+            A_start += 4*M; // float2 --> 8M
+            *((float2*) (sh_A + double_buffer + 2*threadIdx.x)) = *(A_start);
+            B_start += 4;
+            *((float2*) (sh_B + double_buffer + 2*threadIdx.x)) = *(B_start);
+        }
+    }
+
+	int ind = blockIdx.x*16 + (threadIdx.x%4)*4;  // 横、纵坐标  M=HW， K = C， N = K
+	// blockIdx.x*16 < (M + (0)*16) ;  M%16 == 0 && P%2 == 0 ;   relu = max(0, x)
+    int C_offset = ind/(P*Q)*(P*Q*N) + ind%(P*Q) + (threadIdx.x/4)*(P*Q) + blockIdx.y*16*(P*Q);
+    C[C_offset] = reg_C.x > 0 ? reg_C.x : 0;
+    C[C_offset+1] = reg_C.y;
+    C[C_offset+2] = reg_C.z;
+    C[C_offset+3] = reg_C.w;
+}
+
 
 // 64 thread  --  new
 __device__ void fp16gemm_16x16_1(int M, int N, int K, int P, int Q, float *A, float *B, float *C, float* sh) {
@@ -149,7 +230,7 @@ __device__ void fp16gemm_16x16_1(int M, int N, int K, int P, int Q, float *A, fl
 	{
         __syncthreads();
         int A_offset = double_buffer + (im4 << 2);
-        int B_offset = double_buffer + (id4 << 1);	
+        int B_offset = double_buffer + (id4 << 1);
 		
 #pragma unroll
         for (int i=0; i<8; i+=2)   // 全部展开有register spill吗
@@ -773,12 +854,12 @@ __device__ void fp16gemm_16x16_3(int M, int N, int K, int P, int Q, float *A, fl
     int block_base_y = blockIdx.x << 4;
 
     //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
-    int A_offset = block_base_y + (im8 << 1) + (id8)*M;
+    int aoffset = block_base_y + (im8 << 1) + (id8)*M;
 	if(blockIdx.x == 3)
 	{
 		if (im8 == 0)
 		{
-			*(sh_A + thread2) = __float2half_rn(A[A_offset]);
+			*(sh_A + thread2) = __float2half_rn(A[aoffset]);
 		}
 		else
 		{
@@ -789,8 +870,8 @@ __device__ void fp16gemm_16x16_3(int M, int N, int K, int P, int Q, float *A, fl
 	}
 	else
 	{
-		*(sh_A + thread2) = __float2half_rn( A[A_offset] );
-		*(sh_A + thread2 + 1) = __float2half_rn( A[A_offset+1] );
+		*(sh_A + thread2) = __float2half_rn( A[aoffset] );
+		*(sh_A + thread2 + 1) = __float2half_rn( A[aoffset+1] );
 	}
 
     //load B from global memory to shared memory
@@ -841,7 +922,7 @@ __device__ void fp16gemm_16x16_3(int M, int N, int K, int P, int Q, float *A, fl
 		
         if (k+8 < K)
 		{
-            A_start += M << 3; // half2 --> 8M
+            aoffset += M << 3; // half2 --> 8M
             //*((half2*) (sh_A + double_buffer + thread2)) = __float22half2_rn(*(A_start));
 			//*(sh_A + double_buffer + thread2) = __float2half_rn( A[A_offset%(M*K)] );
 			//*(sh_A + double_buffer + thread2 + 1) = __float2half_rn( A[(A_offset+1)%(M*K)] );
@@ -849,7 +930,7 @@ __device__ void fp16gemm_16x16_3(int M, int N, int K, int P, int Q, float *A, fl
 			{
 				if (im8 == 0)
 				{
-					*(sh_A + double_buffer + thread2) = __float2half_rn(A[A_offset]);
+					*(sh_A + double_buffer + thread2) = __float2half_rn(A[aoffset]);
 				}
 				else
 				{
@@ -860,8 +941,8 @@ __device__ void fp16gemm_16x16_3(int M, int N, int K, int P, int Q, float *A, fl
 			}
 			else
 			{
-				*(sh_A + double_buffer + thread2) = __float2half_rn( A[A_offset] );
-				*(sh_A + double_buffer + thread2 + 1) = __float2half_rn( A[A_offset+1] );
+				*(sh_A + double_buffer + thread2) = __float2half_rn( A[aoffset] );
+				*(sh_A + double_buffer + thread2 + 1) = __float2half_rn( A[aoffset+1] );
 			}
 			
             B_start += 4;
@@ -877,9 +958,11 @@ __device__ void fp16gemm_16x16_3(int M, int N, int K, int P, int Q, float *A, fl
     if (blockIdx.x < M/16)
     {
 		// Store the output
-		*((float2*)(C + C_offset)) = reg_C[0];
+		*(C + C_offset) = reg_C[0].x;  // C_offset计算
+		*(C + C_offset + 1) = reg_C[0].y;
 		//C[C_offset+1] = reg_C.y;
-		*((float2*)(C + C_offset + 2)) = reg_C[1];	
+		*(C + C_offset + 2) = reg_C[1].x;
+		*(C + C_offset + 3) = reg_C[1].y;
     }
     else
     {
@@ -915,8 +998,8 @@ __device__ void gemm_64_16x16_3_tensor(int M, int N, int K,  int P, int Q, float
    int thread4 = threadIdx.x << 2;
    
    // Compute block's starting coordinate
-   int block_base_x = blockIdx.y*16;
-   int block_base_y = blockIdx.x*16;
+   int block_base_x = blockIdx.y<<4;
+   int block_base_y = blockIdx.x<<4;
 
     //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
     float *A_start = (A + block_base_y + (im4 << 2) + (id4)*M);
@@ -1139,6 +1222,183 @@ __global__ void gemm_4(int M, int N1, int N2, int N3, int N4,
 }
 
 
+__device__ void gemm_64_16x8_1(int M, int N, int K, float *A, float *B, float *C, float* sh){
+
+	//__shared__ float sh_A[256];
+    //__shared__ float sh_B[128];
+    float* sh_A = sh;
+    float* sh_B = (sh + 256);
+   
+    float2 reg_C;
+	reg_C.x =0.f;
+	reg_C.y =0.f;
+
+    float reg_A[4];
+    //float4 reg_A[2];
+    float reg_B[2];
+
+    // Compute block's starting coordinate
+    int block_base_x = blockIdx.y*8;
+    int block_base_y = blockIdx.x*16;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    float2 *A_start = (float2*) (A + block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M);
+    *((float2*) (sh_A + 2*threadIdx.x)) = *(A_start);
+
+    //load B from global memory to shared memory
+    float *B_start = (B + K*block_base_x + (threadIdx.x/8) + (threadIdx.x%8)*K);
+    *(sh_B + threadIdx.x) = *(B_start);
+
+    int double_buffer_A = 0;
+	int double_buffer_B = 0;
+
+    for(int k = 0; k < K; k += 8)
+	{
+        __syncthreads();
+        int A_offset = double_buffer_A + (threadIdx.x%8)*2;
+        int B_offset = double_buffer_B + (threadIdx.x/8);
+		
+#pragma unroll
+        for (int i=0; i<8; i+=1)
+		{
+            reg_A[0] = sh_A[A_offset];  
+            reg_A[1] = sh_A[A_offset+1]; 
+			reg_B[0] = sh_B[B_offset];
+
+            reg_C.x = fma(reg_A[0], reg_B[0], reg_C.x); // reg_C.x = reg_A[0]*reg_B[0] + reg_A[4]*reg_B[1]
+            reg_C.y = fma(reg_A[1], reg_B[0], reg_C.y);
+			
+			//reg_A[2] = sh_A[A_offset+16];
+            //reg_A[3] = sh_A[A_offset+17];
+			//reg_B[1] = sh_B[B_offset+1];
+			
+            //reg_C.x = fma(reg_A[2], reg_B[1], reg_C.x);
+            //reg_C.y = fma(reg_A[3], reg_B[1], reg_C.y);
+
+            A_offset += 16;
+            B_offset += 8;
+        }
+		
+        double_buffer_A ^= 128;
+		double_buffer_B ^= 64;
+		
+        if (k + 8 < K)
+		{
+            A_start += 4*M; // float2 --> 8M
+            *((float2*) (sh_A + double_buffer_A + 2*threadIdx.x)) = *(A_start);
+            B_start += 8;
+            *(sh_B + double_buffer_B + threadIdx.x) = *(B_start);
+        }
+    }
+	
+	int ind = blockIdx.x*16 + (threadIdx.x%8)*2;  // 行位置
+	// blockIdx.x*16 < (M + (0)*16) ;  M%16 == 0 && P%2 == 0 ;   relu = max(0, x)
+    int	PQ = M;
+    int C_offset = ind/PQ*(PQ*N) + ind%(PQ) + (threadIdx.x/8)*(PQ) + blockIdx.y*8*(PQ);
+    C[C_offset] = reg_C.x;
+    C[C_offset+1] = reg_C.y;
+}
+
+
+__device__ void gemm_64_16x8_3(int M, int N, int K, float *A, float *B, float *C, float* sh){
+
+	//__shared__ float sh_A[256];
+    //__shared__ float sh_B[128];
+   float* sh_A = sh;
+   float* sh_B = (sh + 256);	
+
+    float2 reg_C;
+	reg_C.x =0.f;
+	reg_C.y =0.f;
+
+    float reg_A[4];
+    //float4 reg_A[2];
+    float reg_B[2];
+
+    // Compute block's starting coordinate
+    int block_base_x = blockIdx.y*8;
+    int block_base_y = blockIdx.x*16;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    int aoffset = block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M;
+    *(sh_A + 2*threadIdx.x) = A[aoffset%(M*K)];
+	*(sh_A + 2*threadIdx.x + 1) = A[(aoffset+1)%(M*K)];
+
+    //load B from global memory to shared memory
+    float *B_start = (B + K*block_base_x + (threadIdx.x/8) + (threadIdx.x%8)*K);
+    *(sh_B + threadIdx.x) = *(B_start);
+
+    int double_buffer_A = 0;
+	int double_buffer_B = 0;
+
+    for(int k = 0; k < K; k += 8)
+	{
+        __syncthreads();
+        int A_offset = double_buffer_A + (threadIdx.x%8)*2;
+        int B_offset = double_buffer_B + (threadIdx.x/8);
+		
+#pragma unroll
+        for (int i=0; i<8; i+=1)
+		{
+            reg_A[0] = sh_A[A_offset];  
+            reg_A[1] = sh_A[A_offset+1]; 
+			reg_B[0] = sh_B[B_offset];
+
+            reg_C.x = fma(reg_A[0], reg_B[0], reg_C.x); // reg_C.x = reg_A[0]*reg_B[0] + reg_A[4]*reg_B[1]
+            reg_C.y = fma(reg_A[1], reg_B[0], reg_C.y);
+			
+			//reg_A[2] = sh_A[A_offset+16];
+            //reg_A[3] = sh_A[A_offset+17];
+			//reg_B[1] = sh_B[B_offset+1];
+			
+            //reg_C.x = fma(reg_A[2], reg_B[1], reg_C.x);
+            //reg_C.y = fma(reg_A[3], reg_B[1], reg_C.y);
+
+            A_offset += 16;
+            B_offset += 8;
+        }
+		
+        double_buffer_A ^= 128;
+		double_buffer_B ^= 64;
+		
+        if (k + 8 < K)
+		{
+            // A_start += 4*M; // float2 --> 8M
+			aoffset += 8*M;
+            //*((float2*) (sh_A + double_buffer_A + 2*threadIdx.x)) = *(A_start);
+			*(sh_A + double_buffer_A + 2*threadIdx.x) = A[aoffset%(M*K)];
+			*(sh_A + double_buffer_A + 2*threadIdx.x + 1) = A[(aoffset+1)%(M*K)];
+            B_start += 8;
+            *(sh_B + double_buffer_B + threadIdx.x) = *(B_start);
+        }
+    }
+	
+	int ind = blockIdx.x*16 + (threadIdx.x%8)*2;  // 行位置
+	// blockIdx.x*16 < (M + (0)*16) ;  M%16 == 0 && P%2 == 0 ;   relu = max(0, x)
+    int	PQ = M;
+    int C_offset = ind/PQ*(PQ*N) + ind%(PQ) + (threadIdx.x/8)*(PQ) + blockIdx.y*8*(PQ);
+    //C[C_offset] = reg_C.x;
+    //C[C_offset+1] = reg_C.y;
+	
+    if (blockIdx.x < M/16)
+    {
+		C[C_offset] = reg_C.x;
+		C[C_offset+1] = reg_C.y;
+    }
+    else
+    {
+       int ruler = (threadIdx.x%4)*4;
+       int rag = M%16;
+	   
+       if (ruler == 0)
+	   {
+           C[C_offset] = reg_C.x;
+	   }
+    }
+}
+
+
+
 __global__ void gemm_4_2(int M, int N1, int N2, int N3, int N4, 
 					   int K, int P, int Q, 
 					   float *A1, float *A2, 
@@ -1187,8 +1447,9 @@ __global__ void gemm_4_2(int M, int N1, int N2, int N3, int N4,
    			//(N*P*Q)%16==0 && (P*Q)%4==0
    			//gemm_64_16x16_1(M, N, K, P, Q, A, B, C, sh);
 			//gemm_32_16x16_tc(M, N, K, P, Q, A, B, C, sh);
-			fp16gemm_16x16_1(M, N, K, P, Q, A, B, C, sh);  // half
+			//fp16gemm_16x16_1(M, N, K, P, Q, A, B, C, sh);  // half
 			//fp16gemm_16x16_tensor(M, N, K, P, Q, A, B, C, sh);  // tensor
+			gemm_64_16x8_1(M, N, K, P, Q, A, B, C, sh); 
    		}
    		else if (M%16 == 0)
 		{
@@ -1199,8 +1460,9 @@ __global__ void gemm_4_2(int M, int N1, int N2, int N3, int N4,
 		{
    			//(N*P*Q%16!=0)
    			//gemm_64_16x16_3(M, N, K, P, Q, A, B, C, sh);
-			fp16gemm_16x16_3(M, N, K, P, Q, A, B, C, sh); // half
+			//fp16gemm_16x16_3(M, N, K, P, Q, A, B, C, sh); // half
 			//gemm_64_16x16_3_tensor(M, N, K, P, Q, A, B, C, sh); // tensor
+			gemm_64_16x8_3(M, N, K, P, Q, A, B, C, sh); 
     	}
     }
 }
