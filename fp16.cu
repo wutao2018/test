@@ -401,8 +401,8 @@ __global__ void gemm_32_16x8_1(int M, int N, int K, float *A, float *B, float *C
     int block_base_y = blockIdx.x*16;
 
     //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
-    float2 *A_start = (float2*) (A + block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M);
-    *((float2*) (sh_A + 2*threadIdx.x)) = *(A_start);
+    float4 *A_start = (float4*) (A + block_base_y + (threadIdx.x%4)*4 + (threadIdx.x/4)*M);
+    *((float4*) (sh_A + 4*threadIdx.x)) = *(A_start);
 
     //load B from global memory to shared memory
     float2 *B_start = (float2*) (B + K*block_base_x + (threadIdx.x/8)*2 + (threadIdx.x%8)*K);
@@ -454,8 +454,9 @@ __global__ void gemm_32_16x8_1(int M, int N, int K, float *A, float *B, float *C
 		
         if (k + 8 < K)
 		{
-            A_start += 4*M; // float2 --> 8M
-            *((float2*) (sh_A + double_buffer_A + 2*threadIdx.x)) = *(A_start);
+            A_start += 2*M; // float2 --> 8M
+            *((float4*) (sh_A + double_buffer_A + 4*threadIdx.x)) = *(A_start);
+			
             B_start += 4;
             *((float2*) (sh_B + double_buffer_B + 2*threadIdx.x)) = *(B_start);
         }
@@ -493,9 +494,11 @@ __global__ void gemm_32_16x8_3(int M, int N, int K, float *A, float *B, float *C
     int block_base_y = blockIdx.x*16;
 
     //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
-    int A_start = block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M);
+    int A_start = block_base_y + (threadIdx.x%4)*4 + (threadIdx.x/4)*M;
     *(sh_A + 2*threadIdx.x) = A[A_start%(M*K)];
-	*(sh_A + 2*threadIdx.x+1) = A[(A_start+1)%(M*K)];
+	*(sh_A + 4*threadIdx.x+1) = A[(A_start+1)%(M*K)];
+	*(sh_A + 4*threadIdx.x+2) = A[(A_start+2)%(M*K)];
+	*(sh_A + 4*threadIdx.x+3) = A[(A_start+3)%(M*K)];
 
     //load B from global memory to shared memory
     float2 *B_start = (float2*) (B + K*block_base_x + (threadIdx.x/8)*2 + (threadIdx.x%8)*K);
@@ -548,8 +551,10 @@ __global__ void gemm_32_16x8_3(int M, int N, int K, float *A, float *B, float *C
         if (k + 8 < K)
 		{
             A_start += 8*M; // float2 --> 8M
-			*(sh_A + double_buffer_A + 2*threadIdx.x) = A[A_start%(M*K)];
-			*(sh_A + double_buffer_A + 2*threadIdx.x+1) = A[(A_start+1)%(M*K)];
+			*(sh_A + double_buffer_A + 4*threadIdx.x) = A[A_start%(M*K)];
+			*(sh_A + double_buffer_A + 4*threadIdx.x+1) = A[(A_start+1)%(M*K)];
+			*(sh_A + double_buffer_A + 4*threadIdx.x+2) = A[(A_start+2)%(M*K)];
+			*(sh_A + double_buffer_A + 4*threadIdx.x+3) = A[(A_start+3)%(M*K)];
             B_start += 4;
             *((float2*) (sh_B + double_buffer_B + 2*threadIdx.x)) = *(B_start);
         }
@@ -558,11 +563,7 @@ __global__ void gemm_32_16x8_3(int M, int N, int K, float *A, float *B, float *C
 	int ind = blockIdx.x*16 + (threadIdx.x%4)*4;  // 横、纵坐标  M=HW， K = C， N = K
 	// blockIdx.x*16 < (M + (0)*16) ;  M%16 == 0 && P%2 == 0 ;   relu = max(0, x)
     int	PQ = M;
-    int C_offset = ind/PQ*(PQ*N) + ind%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*8*(PQ);
-    //C[C_offset] = reg_C.x;
-    //C[C_offset+1] = reg_C.y;
-    //C[C_offset+2] = reg_C.z;
-    //C[C_offset+3] = reg_C.w;
+    int C_offset = ind%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*8*(PQ);
 	
     if (blockIdx.x < M/16)
     {
@@ -2773,8 +2774,8 @@ int main(int argc, char* argv[])
    
    dim3 gridDim4;
    dim3 blockDim4;
-   gridDim4.x = MATRIX_M/16; gridDim4.y = MATRIX_N/8; gridDim4.z = 1;
-   blockDim4.x = 64; gridDim4.y = 1; gridDim4.z = 1;
+   gridDim4.x = MATRIX_M/16 + 1; gridDim4.y = MATRIX_N/8; gridDim4.z = 1;
+   blockDim4.x = 32; gridDim4.y = 1; gridDim4.z = 1;
    
    printf("Running with wmma...\n");
    cudaErrCheck(cudaEventRecord(startWMMA));
@@ -2798,8 +2799,8 @@ int main(int argc, char* argv[])
    //gemm_64_16x8_1<<< gridDim4, blockDim4 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
    //gemm_64_16x8_3<<< gridDim4, blockDim4 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
    //gemm_64_8x8_1<<< gridDim4, blockDim4 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
-   //gemm_32_16x8_3<<< gridDim4, blockDim4 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
-   gemm_32_16x8_1<<< gridDim4, blockDim4 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+   gemm_32_16x8_3<<< gridDim4, blockDim4 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+   //gemm_32_16x8_1<<< gridDim4, blockDim4 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
    cudaErrCheck(cudaEventRecord(stopWMMA));
    
    // Now using cuBLAS
