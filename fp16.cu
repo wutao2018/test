@@ -399,8 +399,9 @@ __global__ void gemm_64_16x8_3(int M, int N, int K, float *A, float *B, float *C
     int block_base_y = blockIdx.x*16;
 
     //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
-    float2 *A_start = (float2*) (A + block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M);
-    *((float2*) (sh_A + 2*threadIdx.x)) = *(A_start);
+    int aoffset = block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M;
+    *(sh_A + 2*threadIdx.x) = A[aoffset%(M*K)];
+	*(sh_A + 2*threadIdx.x + 1) = A[(aoffset+1)%(M*K)];
 
     //load B from global memory to shared memory
     float *B_start = (B + K*block_base_x + (threadIdx.x/8) + (threadIdx.x%8)*K);
@@ -441,8 +442,11 @@ __global__ void gemm_64_16x8_3(int M, int N, int K, float *A, float *B, float *C
 		
         if (k + 8 < K)
 		{
-            A_start += 4*M; // float2 --> 8M
-            *((float2*) (sh_A + double_buffer_A + 2*threadIdx.x)) = *(A_start);
+            // A_start += 4*M; // float2 --> 8M
+			aoffset += 8*M;
+            //*((float2*) (sh_A + double_buffer_A + 2*threadIdx.x)) = *(A_start);
+			*(sh_A + double_buffer_A + 2*threadIdx.x) = A[aoffset%(M*K)];
+			*(sh_A + double_buffer_A + 2*threadIdx.x + 1) = A[(aoffset+1)%(M*K)];
             B_start += 8;
             *(sh_B + double_buffer_B + threadIdx.x) = *(B_start);
         }
