@@ -380,6 +380,210 @@ __global__ void gemm_64_16x8_1(int M, int N, int K, float *A, float *B, float *C
     C[C_offset+1] = reg_C.y;
 }
 
+// 16*8 subtile_K = 8
+__global__ void gemm_32_16x8_1(int M, int N, int K, float *A, float *B, float *C){
+
+	__shared__ float sh_A[256];
+    __shared__ float sh_B[128];
+
+    float4 reg_C;
+	reg_C.x =0.f;
+	reg_C.y =0.f;
+	reg_C.z =0.f;
+	reg_C.w =0.f;
+
+    float reg_A[8];
+    //float4 reg_A[2];
+    float reg_B[2];
+
+    // Compute block's starting coordinate
+    int block_base_x = blockIdx.y*8;
+    int block_base_y = blockIdx.x*16;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    float2 *A_start = (float2*) (A + block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M);
+    *((float2*) (sh_A + 2*threadIdx.x)) = *(A_start);
+
+    //load B from global memory to shared memory
+    float2 *B_start = (float2*) (B + K*block_base_x + (threadIdx.x/8)*2 + (threadIdx.x%8)*K);
+    *((float2*) (sh_B + 2*threadIdx.x)) = *(B_start);
+
+    int double_buffer_A = 0;
+	int double_buffer_B = 0;
+#pragma unroll
+    for(int k = 0; k < K; k += 8)
+	{
+        __syncthreads();
+        int A_offset = double_buffer_A + (threadIdx.x%4)*4;
+        int B_offset = double_buffer_B + ((threadIdx.x/4)*2);	
+		
+#pragma unroll
+        for (int i=0; i<8; i+=2)   // 全部展开有register spill吗
+		{
+            reg_A[0] = sh_A[A_offset];    // A_offset+0 ~ A_offset+3 为什么不用向量呢
+            reg_A[1] = sh_A[A_offset+1];  // 为了避免bank冲突, 这8个寄存器都不是连续的【4个就不会重复】，因此不能使用向量传输指令
+            reg_A[2] = sh_A[A_offset+2];
+            reg_A[3] = sh_A[A_offset+3];
+	   // *(float4*)reg_A = *(float4*)(sh_A+A_offset);
+	    reg_A[4] = sh_A[A_offset+16];
+            reg_A[5] = sh_A[A_offset+17];
+            reg_A[6] = sh_A[A_offset+18];
+            reg_A[7] = sh_A[A_offset+19];
+	   //*(float4*)(reg_A+4) = *(float4*)(sh_A+A_offset+16);
+	    reg_B[0] = sh_B[B_offset];
+			
+            reg_C.x = fma(reg_A[0], reg_B[0], reg_C.x); // reg_C.x = reg_A[0]*reg_B[0] + reg_A[4]*reg_B[1]
+            reg_C.y = fma(reg_A[1], reg_B[0], reg_C.y);
+            reg_C.z = fma(reg_A[2], reg_B[0], reg_C.z);
+            reg_C.w = fma(reg_A[3], reg_B[0], reg_C.w);
+			
+		//	reg_B[0] = sh_B[B_offset];
+			reg_B[1] = sh_B[B_offset+1];
+			
+            reg_C.x = fma(reg_A[4], reg_B[1], reg_C.x);
+            reg_C.y = fma(reg_A[5], reg_B[1], reg_C.y);
+            reg_C.z = fma(reg_A[6], reg_B[1], reg_C.z);
+            reg_C.w = fma(reg_A[7], reg_B[1], reg_C.w);
+
+            A_offset += 32;
+            B_offset += 16;
+        }
+		
+        double_buffer_A ^= 128;
+		double_buffer_B ^= 64;
+		
+        if (k + 8 < K)
+		{
+            A_start += 4*M; // float2 --> 8M
+            *((float2*) (sh_A + double_buffer_A + 2*threadIdx.x)) = *(A_start);
+            B_start += 4;
+            *((float2*) (sh_B + double_buffer_B + 2*threadIdx.x)) = *(B_start);
+        }
+    }
+
+	int ind = blockIdx.x*16 + (threadIdx.x%4)*4;  // 横、纵坐标  M=HW， K = C， N = K
+	// blockIdx.x*16 < (M + (0)*16) ;  M%16 == 0 && P%2 == 0 ;   relu = max(0, x)
+    int	PQ = M;
+    int C_offset = ind/PQ*(PQ*N) + ind%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*8*(PQ);
+    C[C_offset] = reg_C.x;
+    C[C_offset+1] = reg_C.y;
+    C[C_offset+2] = reg_C.z;
+    C[C_offset+3] = reg_C.w;
+}
+
+
+// 16*8 subtile_K = 8
+__global__ void gemm_32_16x8_3(int M, int N, int K, float *A, float *B, float *C){
+
+	__shared__ float sh_A[256];
+    __shared__ float sh_B[128];
+
+    float4 reg_C;
+	reg_C.x =0.f;
+	reg_C.y =0.f;
+	reg_C.z =0.f;
+	reg_C.w =0.f;
+
+    float reg_A[8];
+    //float4 reg_A[2];
+    float reg_B[2];
+
+    // Compute block's starting coordinate
+    int block_base_x = blockIdx.y*8;
+    int block_base_y = blockIdx.x*16;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    int A_start = block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M);
+    *(sh_A + 2*threadIdx.x) = A[A_start%(M*K)];
+	*(sh_A + 2*threadIdx.x+1) = A[(A_start+1)%(M*K)];
+
+    //load B from global memory to shared memory
+    float2 *B_start = (float2*) (B + K*block_base_x + (threadIdx.x/8)*2 + (threadIdx.x%8)*K);
+    *((float2*) (sh_B + 2*threadIdx.x)) = *(B_start);
+
+    int double_buffer_A = 0;
+	int double_buffer_B = 0;
+#pragma unroll
+    for(int k = 0; k < K; k += 8)
+	{
+        __syncthreads();
+        int A_offset = double_buffer_A + (threadIdx.x%4)*4;
+        int B_offset = double_buffer_B + ((threadIdx.x/4)*2);	
+		
+#pragma unroll
+        for (int i=0; i<8; i+=2)   // 全部展开有register spill吗
+		{
+            reg_A[0] = sh_A[A_offset];    // A_offset+0 ~ A_offset+3 为什么不用向量呢
+            reg_A[1] = sh_A[A_offset+1];  // 为了避免bank冲突, 这8个寄存器都不是连续的【4个就不会重复】，因此不能使用向量传输指令
+            reg_A[2] = sh_A[A_offset+2];
+            reg_A[3] = sh_A[A_offset+3];
+	   // *(float4*)reg_A = *(float4*)(sh_A+A_offset);
+	    reg_A[4] = sh_A[A_offset+16];
+            reg_A[5] = sh_A[A_offset+17];
+            reg_A[6] = sh_A[A_offset+18];
+            reg_A[7] = sh_A[A_offset+19];
+	   //*(float4*)(reg_A+4) = *(float4*)(sh_A+A_offset+16);
+	    reg_B[0] = sh_B[B_offset];
+			
+            reg_C.x = fma(reg_A[0], reg_B[0], reg_C.x); // reg_C.x = reg_A[0]*reg_B[0] + reg_A[4]*reg_B[1]
+            reg_C.y = fma(reg_A[1], reg_B[0], reg_C.y);
+            reg_C.z = fma(reg_A[2], reg_B[0], reg_C.z);
+            reg_C.w = fma(reg_A[3], reg_B[0], reg_C.w);
+			
+		//	reg_B[0] = sh_B[B_offset];
+			reg_B[1] = sh_B[B_offset+1];
+			
+            reg_C.x = fma(reg_A[4], reg_B[1], reg_C.x);
+            reg_C.y = fma(reg_A[5], reg_B[1], reg_C.y);
+            reg_C.z = fma(reg_A[6], reg_B[1], reg_C.z);
+            reg_C.w = fma(reg_A[7], reg_B[1], reg_C.w);
+
+            A_offset += 32;
+            B_offset += 16;
+        }
+		
+        double_buffer_A ^= 128;
+		double_buffer_B ^= 64;
+		
+        if (k + 8 < K)
+		{
+            A_start += 8*M; // float2 --> 8M
+			*(sh_A + double_buffer_A + 2*threadIdx.x) = A[A_start%(M*K)];
+			*(sh_A + double_buffer_A + 2*threadIdx.x+1) = A[(A_start+1)%(M*K)];
+            B_start += 4;
+            *((float2*) (sh_B + double_buffer_B + 2*threadIdx.x)) = *(B_start);
+        }
+    }
+
+	int ind = blockIdx.x*16 + (threadIdx.x%4)*4;  // 横、纵坐标  M=HW， K = C， N = K
+	// blockIdx.x*16 < (M + (0)*16) ;  M%16 == 0 && P%2 == 0 ;   relu = max(0, x)
+    int	PQ = M;
+    int C_offset = ind/PQ*(PQ*N) + ind%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*8*(PQ);
+    //C[C_offset] = reg_C.x;
+    //C[C_offset+1] = reg_C.y;
+    //C[C_offset+2] = reg_C.z;
+    //C[C_offset+3] = reg_C.w;
+	
+    if (blockIdx.x < M/16)
+    {
+		C[C_offset] = reg_C.x;
+		C[C_offset+1] = reg_C.y;
+		C[C_offset+2] = reg_C.z;
+		C[C_offset+3] = reg_C.w;		
+    }
+    else
+    {
+       int ruler = (threadIdx.x%4)*4;
+       int rag = M%16;
+	   
+       if (ruler == 0)
+	   {
+           C[C_offset] = reg_C.x;
+	   }
+    }	
+}
+
+
 
 __global__ void gemm_64_16x8_3(int M, int N, int K, float *A, float *B, float *C){
 
@@ -2569,7 +2773,7 @@ int main(int argc, char* argv[])
    
    dim3 gridDim4;
    dim3 blockDim4;
-   gridDim4.x = MATRIX_M/16 + 1; gridDim4.y = MATRIX_N/8; gridDim4.z = 1;
+   gridDim4.x = MATRIX_M/16; gridDim4.y = MATRIX_N/8; gridDim4.z = 1;
    blockDim4.x = 64; gridDim4.y = 1; gridDim4.z = 1;
    
    printf("Running with wmma...\n");
@@ -2592,8 +2796,10 @@ int main(int argc, char* argv[])
    //gemm_256_128x64_16_2<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
    //gemm_256_128x64<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
    //gemm_64_16x8_1<<< gridDim4, blockDim4 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
-   gemm_64_16x8_3<<< gridDim4, blockDim4 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+   //gemm_64_16x8_3<<< gridDim4, blockDim4 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
    //gemm_64_8x8_1<<< gridDim4, blockDim4 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+   //gemm_32_16x8_3<<< gridDim4, blockDim4 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+   gemm_32_16x8_1<<< gridDim4, blockDim4 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
    cudaErrCheck(cudaEventRecord(stopWMMA));
    
    // Now using cuBLAS
