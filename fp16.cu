@@ -1,704 +1,1078 @@
+ 
+ //  nvcc -o gemm -arch=sm_70 -lcublas -lcurand fp16.cu
 
-/* Copyright (c) 2019, NVIDIA CORPORATION. All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *  * Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *  * Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *  * Neither the name of NVIDIA CORPORATION nor the names of its
- *    contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
- * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
- * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
- * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
-// CUDA sample demonstrating a GEMM computation using the Warp Matrix Multiply
-// and Accumulate API introduced in CUDA 9.
-
-// In this program, the compute_gemm kernel computes the result of a matrix
-// multiplication and addition: D = alpha * A * B + beta * C. The dimensions of
-// both C and D matrices are M_GLOBAL x N_GLOBAL. The A matrix is M_GLOBAL x
-// K_GLOBAL (row-major), the B matrix is K_GLOBAL x N_GLOBAL (column-major). In
-// that kernel, each CTA computes one 128 x 128 tile of the resulting matrix per
-// iteration. When the tile is computed, the CTA stores it to the global memory
-// and begins a new iteration, selecting a new 128 x 128 tile to compute.
-// Each CTA consists of eight warps. For the 128 x 128 tile, each warp computes
-// eight 16 x 16 subtiles, organized in a 2 x 4 two-dimensional array. Warps
-// compute the 16 x 16 subtiles using nvcuda::wmma::mma_sync operations by moving
-// through the K_GLOBAL dimension of the A and B matrices and accumulating the
-// intermediate result in the local thread state.
-
-// There are a number of simple optimizations used in the algorithm:
-// - The CTA copies the 128 x 128 tile of the C matrix from the global memory to
-//   shared memory. After that is done, each warp loads the C matrix fragments
-//   from shared memory, thus avoiding a random global memory access.
-// - On each internal iteration, the CTA copies a portion of the A and B matrices 
-//   from global memory to shared memory. After that, all warps in the CTA reuse 
-//   the A and B data from shared memory, thus reducing the number of data copies
-//   from global memory.
-// - The portions of the A and B matrices are stored in shared memory with an
-//   additional padding (skew) to reduce the number of shared memory access 
-//   bank conflicts. 
-//   (See a detailed explanation near the SKEW_HALF macro definition.)
-// - When the CTA finishes computing the tiles of the resulting matrix, each
-//   warp stores its subtiles to shared memory. The CTA then copies the shared 
-//   memory contents to global memory, again avoiding redundant random global 
-//   memory accesses.
-// - Note that the CTA tile size is chosen to maximize the GPU register
-//   utilization, but carefully enough to avoid local memory use.
-
-#include <assert.h>
-#include <cuda.h>
-#include <mma.h>
 #include <stdio.h>
+#include <curand.h>
+#include <cublas_v2.h>
 
-// helper functions and utilities to work with CUDA
-#include <helper_cuda.h>
-#include <helper_functions.h>
+#include <cuda_fp16.h>
 
-// Externally configurable parameters.
 
-#ifndef CPU_DEBUG
-// Set this to 1 to verify the correctness of the GPU-computed matrix.
-#define CPU_DEBUG 0
-#endif
+// Define some error checking macros.
+#define cudaErrCheck(stat) { cudaErrCheck_((stat), __FILE__, __LINE__); }
+void cudaErrCheck_(cudaError_t stat, const char *file, int line) {
+   if (stat != cudaSuccess) {
+      fprintf(stderr, "CUDA Error: %s %s %d\n", cudaGetErrorString(stat), file, line);
+   }
+}
 
-#ifndef SHARED_MEMORY_LIMIT_64K
-// Set this to 0 to use more than 64 Kb of shared memory to cache data, to
-// improve the performance of the computations on GPU.
-// Note that you need a GPU that can have more than 64 Kb of shared memory
-// per multiprocessor.
-#define SHARED_MEMORY_LIMIT_64K 1
-#endif
+#define cublasErrCheck(stat) { cublasErrCheck_((stat), __FILE__, __LINE__); }
+void cublasErrCheck_(cublasStatus_t stat, const char *file, int line) {
+   if (stat != CUBLAS_STATUS_SUCCESS) {
+      fprintf(stderr, "cuBLAS Error: %d %s %d\n", stat, file, line);
+   }
+}
 
-// GPU configuration.
+#define curandErrCheck(stat) { curandErrCheck_((stat), __FILE__, __LINE__); }
+void curandErrCheck_(curandStatus_t stat, const char *file, int line) {
+   if (stat != CURAND_STATUS_SUCCESS) {
+      fprintf(stderr, "cuRand Error: %d %s %d\n", stat, file, line);
+   }
+}
 
-#define WARP_SIZE 32
 
-// MMA matrix tile dimensions.
-
-#define M 16
-#define N 16
-#define K 16
-
-#define WMMA_M 16
-#define WMMA_N 16
-#define WMMA_K 16
-
-// GEMM configuration.
-#define M_TILES 256
-#define N_TILES 256
-#define K_TILES 256
-
-// M_GLOBAL = 16*256 = 4096
-#define M_GLOBAL (M * M_TILES)
-#define N_GLOBAL (N * N_TILES)
-#define K_GLOBAL (K * K_TILES)
-
-#define C_LAYOUT wmma::mem_row_major
-
-// Implementation constants.
-
-#define WARPS_PER_BLOCK 8
-#define THREADS_PER_BLOCK (WARP_SIZE * WARPS_PER_BLOCK)
-
-#if SHARED_MEMORY_LIMIT_64K
-// With only 64 Kb shared memory available, we can fit two 8-tile chunks of
-// the A and B matrix data, that are 16 * 16 * 8 * 8 * 2 = 32 Kb each
-// (i.e. two 8x8 arrays of tiles of 16x16 half-typed elements per CTA).
-// But we cannot account the 8 Kb total skew overhead, without which the
-// performance would be severely impacted. So we choose to reduce the chunk size
-// in half, i.e. the amount of A and B matrix data we cache in shared memory.
-// Accordingly, this doubles the number of outer iterations across the global K
-// dimension, which only slightly impacts the performance.
-#define CHUNK_K 4
-#else
-#define CHUNK_K 8
-#endif
-
-#define CHUNK_LINE_BYTES (CHUNK_K * K * sizeof(half))
-#define WARP_COPY_BYTES (WARP_SIZE * sizeof(int4))
-#define CHUNK_COPY_LINES_PER_WARP (WARP_COPY_BYTES / CHUNK_LINE_BYTES)
-#define CHUNK_COPY_LINE_LANES (WARP_SIZE / CHUNK_COPY_LINES_PER_WARP)
-
-#define BLOCK_ROW_WARPS 2
-#define BLOCK_COL_WARPS 4
-
-#define WARP_ROW_TILES 4
-#define WARP_COL_TILES 2
-
-#define BLOCK_ROW_TILES (WARP_ROW_TILES * BLOCK_ROW_WARPS)
-#define BLOCK_COL_TILES (WARP_COL_TILES * BLOCK_COL_WARPS)
-
-#define GLOBAL_MEM_STRIDE N_GLOBAL
-
-#define SHMEM_STRIDE (N * BLOCK_ROW_TILES)
-#define SHMEM_OFFSET (N * WARP_ROW_TILES)
-
-// The macro below is used to shift rows of the A matrix and columns of the B matrix in shared 
-// memory to minimize possible bank conflicts.
-// Before performing the nvcuda::wmma::mma_sync operation, the warp must load the matrix data  
-// using the nvcuda::wmma::load_matrix_sync operation. Although the memory access pattern is 
-// not specified for that function, each lane in the warp can read one or multiple matrix
-// elements from different matrix rows or columns.
-// For shared memory, such access can result in bank conflicts if different rows / columns of the
-// matrix map to the same bank. By shifting each row and column by a few bytes, we make sure that
-// they map to different banks, thus reducing the number of possible bank conflicts.
-// The number of 16 two-byte "half" elements is chosen as the minimum possible shift because we 
-// must keep each row and column 256-bit aligned, as required by nvcuda::wmma::load_matrix_sync.
-#define SKEW_HALF 16
-
-#define checkKernelErrors(expr)                             \
-  do {                                                      \
-    expr;                                                   \
-                                                            \
-    cudaError_t __err = cudaGetLastError();                 \
-    if (__err != cudaSuccess) {                             \
-      printf("Line %d: '%s' failed: %s\n", __LINE__, #expr, \
-             cudaGetErrorString(__err));                    \
-      abort();                                              \
-    }                                                       \
-  } while (0)
-
+#include <mma.h>
 using namespace nvcuda;
 
-__host__ void init_host_matrices(half *a, half *b, float *c) {
-  for (int i = 0; i < M_GLOBAL; i++) {
-    for (int j = 0; j < K_GLOBAL; j++) {
-      a[i * K_GLOBAL + j] = (half)(rand() % 3);
-    }
-  }
+// Must be multiples of 16 for wmma code to work  16384
+#define MATRIX_M 1024
+#define MATRIX_N 1024
+#define MATRIX_K 1024
 
-  for (int i = 0; i < N_GLOBAL; i++) {
-    for (int j = 0; j < K_GLOBAL; j++) {
-      b[i * K_GLOBAL + j] = (half)(rand() % 3);
-    }
-  }
 
-  for (int t = 0; t < M_GLOBAL * N_GLOBAL; t++) {
-    c[t] = static_cast<float>(rand() % 3);
-  }
+
+// The only dimensions currently supported by WMMA
+const int WMMA_M = 16;
+const int WMMA_N = 16;
+const int WMMA_K = 16;
+
+
+__global__ void convertFp32ToFp16 (half *out, float *in, int n) {
+   int idx = blockDim.x * blockIdx.x + threadIdx.x;
+   if (idx < n) {
+      out[idx] = in[idx];
+   }
 }
 
-// 结果保存在C和D矩阵中
-__global__ void compute_gemm(const half *A, const half *B, const float *C,
-                             float *D, float alpha, float beta) 
-{
-  // CHUNK_K * K + SKEW_HALF = 4*16 + 16 = 80
-  extern __shared__ half shmem[][CHUNK_K * K + SKEW_HALF];  // 使用SHMEM_SZ除于CHUNK_K * K + SKEW_HALF得到第1维的尺度
+// 64 thread
+__global__ void fp16gemm_16x16(float *A, float *B, float *C, int M, int N, int K, float alpha, float beta) {
 
-  // Warp and lane identification.  WARP_SIZE=32
-  const unsigned int warpId = threadIdx.x / WARP_SIZE;
-  const unsigned int laneId = threadIdx.x % WARP_SIZE;
-
-  // Offset in shared memory from which the B matrix is stored.
-  // BLOCK_COL_TILES * M = (WARP_COL_TILES * BLOCK_COL_WARPS)*M = 2*4*16 = 128
-  const size_t shmem_idx_b_off = BLOCK_COL_TILES * M; 
-
-  // This pointer is used to access the C and D matrix tiles this warp computes.
-  // SHMEM_STRIDE = (N * BLOCK_ROW_TILES) = N* (WARP_ROW_TILES * BLOCK_ROW_WARPS) = 16*4*2
-  // SHMEM_OFFSET = (N * WARP_ROW_TILES) = 16*4
-  // 指针
-  float *shmem_warp_tile_ptr = (float *)&shmem[0][0] + (warpId / 2) * SHMEM_STRIDE * K * 2 +
-                               (warpId % 2) * SHMEM_OFFSET;
-
-  // This pointer is used to stream the C and D matrices block-wide tile to and from shared memory.
-  // SHMEM_STRIDE * K = 128*16 = 2K
-  float *shmem_warp_stream_ptr = (float *)&shmem[0][0] + warpId * SHMEM_STRIDE * K;
-
-  // Adjust the beta scaler, as it'll be multiplied by alpha at the end of
-  // each tile computation. Technically this is not generally correct (may
-  // result in a loss of precision). Zero still needs to be specially handled
-  // though.
-  beta /= alpha;
-
-  // Each CTA slides along the 128 x 128 tiles from the top left corner of the
-  // matrix to the right and down, and selects the next tile to compute. Once
-  // there's no such tile, all warps in this CTA exit.
-  for (unsigned int block_pos = blockIdx.x;; block_pos += gridDim.x) 
-  {
-    // BLOCK_ROW_TILES = (WARP_ROW_TILES * BLOCK_ROW_WARPS) = 4*2
-	// N_TILES = 256, BLOCK_COL_TILES = (WARP_COL_TILES * BLOCK_COL_WARPS) = 2*4
-    const unsigned int block_tile_i = ((block_pos * BLOCK_ROW_TILES) / N_TILES) * (BLOCK_COL_TILES);
+	__shared__ half sh_A[256];
+	__shared__ half sh_B[256];  // 2*16*8
+        
+	float2 reg_C[2];
+	half2 reg_A[4];
+	half2  reg_B[2];
 	
-    const unsigned int block_tile_j = (block_pos * BLOCK_COL_TILES) % N_TILES;
-
-    // Stop when there are no more D matrix tiles to compute in this CTA.
-	// M_TILES = 256
-    if (block_tile_i >= M_TILES) 
-	{
-      break;
-    }
-
-    // This warp's pointer to the C matrix data to copy memory from to shared memory. 
-    // GLOBAL_MEM_STRIDE = (N * N_TILES) = 16*256 = 4K, M = N = 16 矩阵C的全局内存
+	reg_C[0].x = 0.f;
+	reg_C[0].y = 0.f;
+	reg_C[1].x = 0.f;
+	reg_C[1].y = 0.f;
 	
-    const size_t gmem_idx = (block_tile_i + warpId) * M * GLOBAL_MEM_STRIDE + block_tile_j * N;
-    const float *src_gmem_warp_stream_ptr = &C[gmem_idx];
+	int im4 = threadIdx.x & 3;
+	int id4 = threadIdx.x >> 2;
+	int im8 = threadIdx.x & 7;
+	int id8 = threadIdx.x >> 3;
+	int im16 = threadIdx.x & 15;
+	int id16 = threadIdx.x >> 4;
+	
+	int thread2 = threadIdx.x << 1;
 
-    // Stream multiple C tiles to shared memory：C是按行存储的
-	#pragma unroll
-    for (int i = 0; i < K; i++)  // 一次循环 尺寸=128*1=32*4
+    // Compute block's starting coordinate
+    int block_base_x = blockIdx.y << 4;
+    int block_base_y = blockIdx.x << 4;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    float2 *A_start = (float2*) (A + block_base_y + (im8 << 1) + (id8)*M);
+    *((half2*)(sh_A + thread2)) = __float22half2_rn(*(A_start));
+
+    //load B from global memory to shared memory
+    float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
+    *((half2*) (sh_B + thread2)) = __float22half2_rn(*(B_start));
+
+    int double_buffer = 0;
+#pragma unroll
+    for(int k = 0; k < K; k += 8)
 	{
-      typedef int4 copy_t;
-      // SHMEM_STRIDE = (N * BLOCK_ROW_TILES) = N* (WARP_ROW_TILES * BLOCK_ROW_WARPS) = 16*4*2
-	  // GLOBAL_MEM_STRIDE = 4K
-	  
-      *((copy_t *)(shmem_warp_stream_ptr + SHMEM_STRIDE * i) + laneId) =
-					*((copy_t *)(src_gmem_warp_stream_ptr + GLOBAL_MEM_STRIDE * i) + laneId);
-    }
-
-    __syncthreads();  // block内同步，8个warp加载C矩阵到共享内存，每个warp加载16*128的子矩阵
-
-    // These fragments will accumulate the result of A and B matrix fragment
-    // multiplications along the K_GLOBAL dimension.
-	// WARP_COL_TILES = 2, WARP_ROW_TILES = 4, K_GLOBAL = 16 * 256 = 4K	
-    wmma::fragment<wmma::accumulator, M, N, K, float> c[WARP_COL_TILES][WARP_ROW_TILES];
-
-    // Load the C matrix tiles into fragments from shared memory.
-	#pragma unroll
-    for (int i = 0; i < WARP_COL_TILES; i++)
-	{
-	  #pragma unroll
-      for (int j = 0; j < WARP_ROW_TILES; j++)  // SHMEM_STRIDE = 128 = 16*8, N = 16
-	  {
-        const float *tile_ptr = shmem_warp_tile_ptr + i * SHMEM_STRIDE * K + j * N;
+        __syncthreads();
+        int A_offset = double_buffer + (im4 << 2);
+        int B_offset = double_buffer + (id4 << 1);	
 		
-		// C_LAYOUT = wmma::mem_row_major,  SHMEM_STRIDE = 16*8 = 128
-		// 子矩阵C分为8个32*64的子子矩阵，每个warp加载子子矩阵到c[WARP_COL_TILES][WARP_ROW_TILES]
-        wmma::load_matrix_sync(c[i][j], tile_ptr, SHMEM_STRIDE, C_LAYOUT); 
-      }
-    }
-
-    __syncthreads(); // 矩阵C已经加载到register，不需要共享内存了（offset对矩阵C没有用）
-
-    // Scale the C matrix.
-	#pragma unroll
-    for (int i = 0; i < WARP_COL_TILES; i++) 
-	{
-	  #pragma unroll
-      for (int j = 0; j < WARP_ROW_TILES; j++) 
-	  {
-		#pragma unroll
-        for (int t = 0; t < c[i][j].num_elements; t++) // fragment
+#pragma unroll
+        for (int i=0; i<8; i+=2)   // 全部展开有register spill吗
 		{
-          c[i][j].x[t] *= beta;
-        }
-      }
-    }
-
-    // Select what warp copies what matrix to shared memory.
-    // Warps 0-3 copy the A matrix, warps 4-7 copy the B matrix.
-	// K_GLOBAL = 16*256 = 4K
-	// 每个block从全局内存中读取128*64的矩阵A，4个warp分别读取32*64的子矩阵，每个Thread读取一行
-    const half *warp_ptr = (warpId < 4) ? (&A[block_tile_i * M * K_GLOBAL] +
-                                           M * K_GLOBAL * (warpId % 4) * 2)
-                                        : (&B[block_tile_j * N * K_GLOBAL] +
-                                           N * K_GLOBAL * (warpId % 4) * 2);
-
-    // Go through the global K dimension by a fixed step at a time.
-	// K_TILES = 256
-	// CHUNK_K = 4
-	// WARPS_PER_BLOCK = 8 
-    #pragma unroll
-    for (int tile_k = 0; tile_k < K_TILES; tile_k += CHUNK_K) 
-	{
-      // Copy slices of the A and B matrices to shared memory.
-      // The first half of the warps in the CTA copy the A matrix, the rest copy the B matrix.
-      size_t shmem_idx = warpId < (WARPS_PER_BLOCK / 2) ? (M * (warpId % (WARPS_PER_BLOCK / 2)) * 2)
-              : (N * (warpId % (WARPS_PER_BLOCK / 2)) * 2 + shmem_idx_b_off); // shmem_idx_b_off=128
-
-      // First half of the warp copies the first row / column of the matrix,
-      // the second half of the warp copies the next.
-	  
-	  // CHUNK_COPY_LINE_LANES = (WARP_SIZE / CHUNK_COPY_LINES_PER_WARP) 
-	  // = (WARP_SIZE / (WARP_COPY_BYTES / CHUNK_LINE_BYTES)) 
-	  // = 32/(32*sizeof(int4)/(4*16*sizeof(half))) = 8
-	  // CHUNK_LINE_BYTES = (CHUNK_K * K * sizeof(half)) = 4*16*2 = 128
-	  // WARP_COPY_BYTES = (WARP_SIZE * sizeof(int4)) = 32 * 16 = 512
-
-	  // K_GLOBAL = 16 * 256 = 4K, CHUNK_COPY_LINE_LANES = 8
-      int4 *lane_ptr = (int4 *)( warp_ptr + tile_k * K + (laneId / CHUNK_COPY_LINE_LANES) * K_GLOBAL ) +
-                       (laneId % CHUNK_COPY_LINE_LANES); // 全局内存
-
-      // Shift the second half of the warp to the next row / column in the shared memory.
-      shmem_idx += laneId / CHUNK_COPY_LINE_LANES; // CHUNK_COPY_LINE_LANES = 8, laneId / CHUNK_COPY_LINE_LANES = 0,1,2,3
-
-	  // CHUNK_COPY_LINES_PER_WARP = (WARP_COPY_BYTES / CHUNK_LINE_BYTES)
-	  // 						   = 32*sizeof(int4)/(4*16*sizeof(half))=32*16/(8*16) = 4
-	  // ((WARP_SIZE / 2) / CHUNK_COPY_LINES_PER_WARP)*2 = 16*2/4 = 8
-	  #pragma unroll
-      for (int i = 0; i < ((WARP_SIZE / 2) / CHUNK_COPY_LINES_PER_WARP) * 2; i++) 
-	  {
-        // Copy 16 bytes at once in each lane.  16*8 = 128
-        *((int4 *)&shmem[shmem_idx][0] + (laneId % CHUNK_COPY_LINE_LANES)) = *lane_ptr;
-
-        // Advance the global memory pointer and the shared memory index.
-		// CHUNK_COPY_LINES_PER_WARP = 4
-        lane_ptr = (int4 *)((half *)lane_ptr + K_GLOBAL * CHUNK_COPY_LINES_PER_WARP); // 加的是half，所以前面的lane_ptr要转成half
-        shmem_idx += CHUNK_COPY_LINES_PER_WARP;
-      }
-
-      __syncthreads();  // Block内同步， 矩阵A和B从全局内存加载到共享内存
-
-      // Compute a grid of C matrix tiles in each warp.
-	  #pragma unroll
-      for (int k_step = 0; k_step < CHUNK_K; k_step++) // CHUNK_K = 4
-	  {
-	    // WARP_COL_TILES = 2, WARP_ROW_TILES = 4
-        wmma::fragment<wmma::matrix_a, M, N, K, half, wmma::row_major> a[WARP_COL_TILES];
-        wmma::fragment<wmma::matrix_b, M, N, K, half, wmma::col_major> b[WARP_ROW_TILES];
-		
-		#pragma unroll
-        for (int i = 0; i < WARP_COL_TILES; i++) 
-		{
-          size_t shmem_idx_a = (warpId / 2) * M * 2 + (i * M);
-          const half *tile_ptr = &shmem[shmem_idx_a][k_step * K];  
-		  
-		  // K * CHUNK_K + SKEW_HALF = 16*4 + 16 = 80
-          wmma::load_matrix_sync(a[i], tile_ptr, K * CHUNK_K + SKEW_HALF); // 注意fragment的加载，比如k_step=3时
-		  
-		  #pragma unroll
-          for (int j = 0; j < WARP_ROW_TILES; j++) 
-		  {
-            if (i == 0) 
-			{
-              // Load the B matrix fragment once, because it is going to be
-              // reused against the other A matrix fragments.
-              size_t shmem_idx_b = shmem_idx_b_off + (WARP_ROW_TILES * N) * (warpId % 2) + (j * N);
-              const half *tile_ptr = &shmem[shmem_idx_b][k_step * K];
-
-              wmma::load_matrix_sync(b[j], tile_ptr, K * CHUNK_K + SKEW_HALF);
-            }
+			reg_A[0] = *((half2*)(sh_A + A_offset));
+			reg_A[1] = *((half2*)(sh_A + A_offset + 2));
+			reg_A[2] = *((half2*)(sh_A + A_offset + 16));
+			reg_A[3] = *((half2*)(sh_A + A_offset + 18));
+            //reg_A[0] = sh_A[A_offset];    // A_offset+0 ~ A_offset+3 为什么不用向量呢
+			reg_B[0] = *((half2*)(sh_B + B_offset));
+			reg_B[1].x = reg_B[0].y;
+			reg_B[0].y = reg_B[0].x;
+			reg_B[1].y = reg_B[1].x;
+            //reg_A[1] = sh_A[A_offset+1];  // 为了避免bank冲突, 这8个寄存器都不是连续的【4个就不会重复】，因此不能使用向量传输指令
+            //reg_A[2] = sh_A[A_offset+2];
+            //reg_A[3] = sh_A[A_offset+3];
 			
-            wmma::mma_sync(c[i][j], a[i], b[j], c[i][j]);
-          }
+            //reg_C.x = fma(reg_A[0], reg_B[0], reg_C.x); // reg_C.x = reg_A[0]*reg_B[0] + reg_A[4]*reg_B[1]
+            //reg_C.y = fma(reg_A[1], reg_B[0], reg_C.y);
+			reg_C[0] = __half22float2(__hfma2(reg_A[0], reg_B[0], __float22half2_rn(reg_C[0])));
+            //reg_C.z = fma(reg_A[2], reg_B[0], reg_C.z);
+            //reg_C.w = fma(reg_A[3], reg_B[0], reg_C.w);
+			reg_C[1] = __half22float2(__hfma2(reg_A[1], reg_B[0], __float22half2_rn(reg_C[1])));
+			
+			//*((float4*) (reg_A + 4)) = *((float4*)(sh_A + A_offset + 16));
+			//reg_B[1] = sh_B[B_offset+1];
+			//reg_A[4] = sh_A[A_offset+16];
+            //reg_A[5] = sh_A[A_offset+17];
+            //reg_A[6] = sh_A[A_offset+18];
+            //reg_A[7] = sh_A[A_offset+19];
+			A_offset += 32;
+			
+            //reg_C.x = fma(reg_A[4], reg_B[1], reg_C.x);
+            //reg_C.y = fma(reg_A[5], reg_B[1], reg_C.y);
+            //reg_C.z = fma(reg_A[6], reg_B[1], reg_C.z);
+            //reg_C.w = fma(reg_A[7], reg_B[1], reg_C.w);
+			reg_C[0] = __half22float2(__hfma2(reg_A[2], reg_B[1], __float22half2_rn(reg_C[0]))) ;
+			reg_C[1] = __half22float2(__hfma2(reg_A[3], reg_B[1], __float22half2_rn(reg_C[1]))) ;
+
+            B_offset += 32;
         }
-      }
-
-      __syncthreads(); // 等待乘法完成再开始下次加载
-    }
-
-    // Store the D fragments to shared memory.
-	// WARP_COL_TILES = 2, WARP_ROW_TILES = 4
-	#pragma unroll
-    for (int i = 0; i < WARP_COL_TILES; i++)  // unroll后没有数字，完全展开
-	{
-	  #pragma unroll
-      for (int j = 0; j < WARP_ROW_TILES; j++) 
-	  {
-		#pragma unroll
-        // Uniform, point-wise transformations of ALL fragment elements by ALL
-        // threads in the warp are well-defined even though element indices
-        // within fragment storage are not defined.
-        for (int t = 0; t < c[i][j].num_elements; t++) c[i][j].x[t] *= alpha;
 		
-		// SHMEM_STRIDE = (N * BLOCK_ROW_TILES) = N* (WARP_ROW_TILES * BLOCK_ROW_WARPS) = 16*4*2
-        float *tile_ptr = shmem_warp_tile_ptr + i * SHMEM_STRIDE * K + j * N;
-
-        wmma::store_matrix_sync(tile_ptr, c[i][j], SHMEM_STRIDE, C_LAYOUT);
-      }
+        double_buffer ^= 128;  // 16*8
+		
+        if (k+8 < K)
+		{
+            A_start += M << 2; // half2 --> 8M
+            *((half2*) (sh_A + double_buffer + thread2)) = __float22half2_rn(*(A_start));
+            B_start += 4;
+            *((half2*) (sh_B + double_buffer + thread2)) = __float22half2_rn(*(B_start));
+        }
     }
 
-    __syncthreads();
-
-    // Now that shared memory contains all the D tiles, stream them to global memory.
-    float *dst_gmem_warp_stream_ptr = &D[gmem_idx];
-
-	#pragma unroll
-    for (int i = 0; i < K; i++) 
-	{
-	  // GLOBAL_MEM_STRIDE = (N * N_TILES) = 16*256
-      *((int4 *)(dst_gmem_warp_stream_ptr + GLOBAL_MEM_STRIDE * i) + laneId) =
-          *((int4 *)(shmem_warp_stream_ptr + SHMEM_STRIDE * i) + laneId);
-    }
-
-    __syncthreads();  
-  }
-  
-  // CASE：矩阵不能被完整划分
-  
+	int ind = block_base_y + (im4<<2);     // 横、纵坐标  M=HW， K = C， N = K
+	// blockIdx.x*16 < (M + (0)*16) ;  M%16 == 0 && P%2 == 0 ;
+	int PQ = M;
+    int C_offset = ind/(PQ)*(PQ*N) + ind%(PQ) + (id4 + block_base_x)*(PQ);
+    *((float2*)(C + C_offset)) = reg_C[0];
+    //C[C_offset+1] = reg_C.y;
+	*((float2*)(C + C_offset + 2)) = reg_C[1];
 }
 
-// Performs an MxNxK GEMM (C=alpha*A*B + beta*C) assuming:
-//  1) Matrices are packed in memory.
-//  2) M, N and K are multiples of 16.
-//  3) Neither A nor B are transposed.
-// Note: This is a less performant version of the compute_gemm kernel. It is
-// designed for
-//       demonstration purposes only to show the CUDA WMMA API use without
-//       relying on availability of the shared memory.
-__global__ void simple_wmma_gemm(half *a, half *b, float *c, float *d, int m_ld,
-                                 int n_ld, int k_ld, float alpha, float beta) {
-  // Leading dimensions. Packed with no transpositions.
-  int lda = k_ld;
-  int ldb = k_ld;
-  int ldc = n_ld;
 
-  // Tile using a 2D grid
-  int warpM = (blockIdx.x * blockDim.x + threadIdx.x) / warpSize;
-  int warpN = (blockIdx.y * blockDim.y + threadIdx.y);
 
-  // Declare the fragments
-  wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::row_major>
-      a_frag;
-  wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major>
-      b_frag;
-  wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
-  wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
 
-  wmma::fill_fragment(acc_frag, 0.0f);
 
-  // Loop over k
-  for (int i = 0; i < k_ld; i += WMMA_K) 
-  {
-    int aCol = i;
-    int aRow = warpM * WMMA_M;
-    int bCol = warpN * N;
-    int bRow = i;
+// 64 thread
+__global__ void fp16gemm_16x16_tensor(float *A, float *B, float *C, int M, int N, int K, float alpha, float beta) {
 
-    // Bounds checking
-    if (aRow < m_ld && aCol < k_ld && bRow < k_ld && bCol < n_ld) 
+	__shared__ half sh_A[512];
+	__shared__ half sh_B[512];  // 2*16*16
+	
+	int im4 = threadIdx.x & 3;
+	int id4 = threadIdx.x >> 2;
+	//int im8 = threadIdx.x & 7;
+	//int id8 = threadIdx.x >> 3;
+	//int im16 = threadIdx.x & 15;
+	//int id16 = threadIdx.x >> 4;
+	
+	//int thread2 = threadIdx.x << 1;
+	int thread4 = threadIdx.x << 2;
+
+    // Compute block's starting coordinate
+    int block_base_x = blockIdx.y << 4;
+    int block_base_y = blockIdx.x << 4;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    float2 *A_start = (float2*) (A + block_base_y + (im4 << 2) + (id4)*M);
+    *((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
+	*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
+
+    //load B from global memory to shared memory
+	float2 *B_start = (float2*) (B + K*block_base_x + (im4 << 2) + (id4)*K);
+    //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
+    *((half2*) (sh_B + thread4)) = __float22half2_rn(*(B_start));
+	*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
+
+    int double_buffer = 0;
+	
+   // Declare the fragments
+   wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> a_frag;
+   wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> b_frag;
+   wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
+   //wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
+
+   wmma::fill_fragment(acc_frag, 0.0f);
+   
+#pragma unroll
+    for(int k = 0; k < K; k += 16)
 	{
-      // Load the inputs
-      wmma::load_matrix_sync(a_frag, a + aCol + aRow * lda, lda);
-      wmma::load_matrix_sync(b_frag, b + bRow + bCol * ldb, ldb);
+        __syncthreads();
+		
+		// Load the inputs
+        wmma::load_matrix_sync(a_frag, sh_A + double_buffer, 16);
+        wmma::load_matrix_sync(b_frag, sh_B + double_buffer, 16);
+ 
+        // Perform the matrix multiplication
+        wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);
 
-      // Perform the matrix multiplication
-      wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);
+        double_buffer ^= 256;  // 16*16
+		
+        if (k + 16 < K)
+		{
+            A_start += M << 3; // half2 --> 8M
+            *((half2*) (sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
+			*((half2*) (sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start+1));
+			
+            B_start += 8;
+            *((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
+			*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start+1));
+        }
     }
-  }
 
-  // Load in the current value of c, scale it by beta, and add this our result
-  // scaled by alpha
-  int cCol = warpN * WMMA_N;
-  int cRow = warpM * WMMA_M;
-
-  if (cRow < m_ld && cCol < n_ld) 
-  {
-    wmma::load_matrix_sync(c_frag, c + cCol + cRow * ldc, ldc,
-                           wmma::mem_row_major);
-
-    for (int i = 0; i < c_frag.num_elements; i++) 
-	{
-      c_frag.x[i] = alpha * acc_frag.x[i] + beta * c_frag.x[i];
-    }
-
-    // Store the output
-    wmma::store_matrix_sync(d + cCol + cRow * ldc, c_frag, ldc, wmma::mem_row_major);
-  }
+	//int ind = block_base_y + (im4<<2);     // 横、纵坐标  M=HW， K = C， N = K
+	//int PQ = M;
+    //int C_offset = ind/(PQ)*(PQ*N) + ind%(PQ) + (id4 + block_base_x)*(PQ);
+    //*((float2*)(C + C_offset)) = reg_C[0];
+	//*((float2*)(C + C_offset + 2)) = reg_C[1];
+	
+	// Store the output
+    wmma::store_matrix_sync(C + block_base_y + (block_base_x * M), acc_frag, M, wmma::mem_col_major);	
 }
 
-__host__ void matMultiplyOnHost(half *A, half *B, float *C, float alpha,
-                                float beta, int numARows, int numAColumns,
-                                int numBRows, int numBColumns, int numCRows,
-                                int numCColumns) {
-  for (int i = 0; i < numCRows; i++) 
-  {
-    for (int j = 0; j < numCColumns; j++) 
+__global__ void fp16gemm_16x16_tensor2(float *A, float *B, float *C, int M, int N, int K, float alpha, float beta) {
+
+	__shared__ half sh_A[512];
+	__shared__ half sh_B[512];  // 2*16*16
+	
+	int im4 = threadIdx.x & 3;
+	int id4 = threadIdx.x >> 2;
+	
+	//int thread2 = threadIdx.x << 1;
+	int thread4 = threadIdx.x << 2;
+
+    // Compute block's starting coordinate
+    int block_base_x = blockIdx.y << 4;
+    int block_base_y = blockIdx.x << 4;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    float2 *A_start = (float2*) (A + block_base_y + (im4 << 2) + (id4)*M);
+    *((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
+	*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
+
+    //load B from global memory to shared memory
+	float2 *B_start = (float2*) (B + K*block_base_x + (im4 << 2) + (id4)*K);
+    //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
+    *((half2*) (sh_B + thread4)) = __float22half2_rn(*(B_start));
+	*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
+
+    int double_buffer = 0;
+	
+    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
+    //wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
+
+    wmma::fill_fragment(acc_frag, 0.0f);		
+   
+#pragma unroll
+    for(int k = 0; k < K; k += 16)
 	{
-      float temp = 0.0;
+        __syncthreads();
+		
+		if (threadIdx.x < 32)
+		{
+		   // Declare the fragments
+		   wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> a_frag;
+		   wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> b_frag;
+	
+			
+			// Load the inputs
+			wmma::load_matrix_sync(a_frag, sh_A + double_buffer, 16);
+			wmma::load_matrix_sync(b_frag, sh_B + double_buffer, 16);
+	 
+			// Perform the matrix multiplication
+			wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);	
+       }		
 
-      for (int k = 0; k < numAColumns; k++) 
-	  {
-        temp += (float)A[i * numAColumns + k] * (float)B[j * numBRows + k];
-      }
-
-      C[i * numCColumns + j] = temp * alpha + beta * C[i * numCColumns + j];
+        double_buffer ^= 256;  // 16*16
+		
+        if (k + 16 < K)
+		{
+            A_start += M << 3; // half2 --> 8M
+            *((half2*) (sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
+			*((half2*) (sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start+1));
+			
+            B_start += 8;
+            *((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
+			*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start+1));
+        }
     }
-  }
+	
+	// Store the output
+	if (threadIdx.x < 32)
+	{	
+		wmma::store_matrix_sync(C + block_base_y + (block_base_x * M), acc_frag, M, wmma::mem_col_major);
+	}
 }
 
-int main(int argc, char **argv) 
+// 16*32 K = 32
+__global__ void fp16gemm_16x16_tensor2_32(float *A, float *B, float *C, int M, int N, int K, float alpha, float beta) {
+
+	__shared__ half sh_A[512];
+	__shared__ half sh_B[512];  // 2*16*32
+	
+	int im4 = threadIdx.x & 3;
+	int id4 = threadIdx.x >> 2;
+	
+	//int thread2 = threadIdx.x << 1;
+	int thread4 = threadIdx.x << 2;
+
+    // Compute block's starting coordinate
+    int block_base_x = blockIdx.y << 4;
+    int block_base_y = blockIdx.x << 4;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    float2 *A_start = (float2*) (A + block_base_y + (im4 << 2) + (id4)*M);
+    *((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
+	*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
+
+    //load B from global memory to shared memory
+	float2 *B_start = (float2*) (B + K*block_base_x + (im4 << 2) + (id4)*K);
+    //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
+    *((half2*) (sh_B + thread4)) = __float22half2_rn(*(B_start));
+	*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
+
+    int double_buffer = 0;
+	
+    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
+    //wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
+
+    wmma::fill_fragment(acc_frag, 0.0f);		
+   
+#pragma unroll
+    for(int k = 0; k < K; k += 16)
+	{
+        __syncthreads();
+		
+		if (threadIdx.x < 32)
+		{
+		   // Declare the fragments
+		   wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> a_frag;
+		   wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> b_frag;
+	
+			
+			// Load the inputs
+			wmma::load_matrix_sync(a_frag, sh_A + double_buffer, 16);
+			wmma::load_matrix_sync(b_frag, sh_B + double_buffer, 16);
+	 
+			// Perform the matrix multiplication
+			wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);	
+       }		
+
+        double_buffer ^= 256;  // 16*16
+		
+        if (k + 16 < K)
+		{
+            A_start += M << 3; // half2 --> 8M
+            *((half2*) (sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
+			*((half2*) (sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start+1));
+			
+            B_start += 8;
+            *((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
+			*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start+1));
+        }
+    }
+	
+	// Store the output
+	if (threadIdx.x < 32)
+	{	
+		wmma::store_matrix_sync(C + block_base_y + (block_base_x * M), acc_frag, M, wmma::mem_col_major);
+	}
+}
+
+
+
+// 128 threads 16*16
+__global__ void fp16gemm_16x16_tensor4(float *A, float *B, float *C, int M, int N, int K, float alpha, float beta) {
+
+	__shared__ half sh_A[512];
+	__shared__ half sh_B[512];  // 2*16*16
+	
+	int im8 = threadIdx.x & 7;
+	int id8 = threadIdx.x >> 3;
+	
+	//int thread2 = threadIdx.x << 1;
+	int thread4 = threadIdx.x << 1;
+
+    // Compute block's starting coordinate
+    int block_base_x = blockIdx.y << 4;
+    int block_base_y = blockIdx.x << 4;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    float2 *A_start = (float2*) (A + block_base_y + (im8 << 1) + (id8)*M);
+    *((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
+	//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
+
+    //load B from global memory to shared memory
+	float2 *B_start = (float2*) (B + K*block_base_x + (im8 << 1) + (id8)*K);
+    //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
+    *((half2*) (sh_B + thread4)) = __float22half2_rn(*(B_start));
+	//*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
+
+    int double_buffer = 0;
+	
+    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
+    //wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
+
+    wmma::fill_fragment(acc_frag, 0.0f);		
+   
+#pragma unroll
+    for(int k = 0; k < K; k += 16)
+	{
+        __syncthreads();
+		
+		if (threadIdx.x < 32)
+		{
+		   // Declare the fragments
+		   wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> a_frag;
+		   wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> b_frag;
+	
+			
+			// Load the inputs
+			wmma::load_matrix_sync(a_frag, sh_A + double_buffer, 16);
+			wmma::load_matrix_sync(b_frag, sh_B + double_buffer, 16);
+	 
+			// Perform the matrix multiplication
+			wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);	
+       }
+
+        double_buffer ^= 256;  // 16*16
+		
+        if (k + 16 < K)
+		{
+            A_start += M << 3; // half2 --> 8M
+            *((half2*) (sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
+			//*((half2*) (sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start+1));
+			
+            B_start += 8;
+            *((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
+			//*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start+1));
+        }
+    }
+	
+	// Store the output
+	if (threadIdx.x < 32)
+	{	
+		wmma::store_matrix_sync(C + block_base_y + (block_base_x * M), acc_frag, M, wmma::mem_col_major);
+	}
+}
+
+
+// 128 threads 32*32
+__global__ void fp16gemm_32x32_tensor4(float *A, float *B, float *C, int M, int N, int K, float alpha, float beta) {
+
+	__shared__ half sh_A[2048];
+	__shared__ half sh_B[2048];  // 2*32*32
+	
+	__shared__ float sh_c[1024];  // 32*32
+	
+	int im4 = threadIdx.x & 3;
+	int id4 = threadIdx.x >> 2;
+	
+	//int thread2 = threadIdx.x << 1;
+	int thread4 = threadIdx.x << 3;
+
+    // Compute block's starting coordinate
+    int block_base_x = blockIdx.y << 5;
+    int block_base_y = blockIdx.x << 5;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    float2 *A_start = (float2*) (A + block_base_y + (im4 << 3) + (id4)*M);
+    *((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
+	*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
+    *((half2*)(sh_A + thread4 + 16*32)) = __float22half2_rn(*(A_start + 8));
+	*((half2*)(sh_A + thread4 + 16*32 + 2)) = __float22half2_rn(*(A_start + 9));	
+
+    //load B from global memory to shared memory
+	float2 *B_start = (float2*) (B + K*block_base_x + (im4 << 3) + (id4)*K);
+    //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
+    *((half2*) (sh_B + thread4)) = __float22half2_rn(*(B_start));
+	*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
+    *((half2*) (sh_B + thread4 + 32*16)) = __float22half2_rn(*(B_start + 8));
+	*((half2*) (sh_B + thread4 + 32*16 + 2)) = __float22half2_rn(*(B_start + 9));
+	
+    int double_buffer = 0;
+	int offset_a = 0;
+	int offset_b = 0;
+	
+    // Declare the fragments
+	wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> a_frag[2];
+	wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> b_frag[2];
+    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
+    //wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
+
+    wmma::fill_fragment(acc_frag, 0.0f);
+   
+#pragma unroll
+    for(int k = 0; k < K; k += 32)  
+	{
+        __syncthreads();
+		
+		offset_a = (threadIdx.x/64)<<9;  // 0, 0, 512,512;  
+		offset_b =  ((threadIdx.x>>5) & 1)<<8; //0, 256, 0, 256;
+		
+		// Load the inputs
+		wmma::load_matrix_sync(a_frag[0], sh_A + double_buffer + offset_a, 16);
+		wmma::load_matrix_sync(b_frag[0], sh_B + double_buffer + offset_b, 16);
+ 
+		// Perform the matrix multiplication
+		wmma::mma_sync(acc_frag, a_frag[0], b_frag[0], acc_frag);
+		
+		offset_a += 256 ;  //  256, 256, 768, 768;
+		offset_b += 512 ;  //  512, 768, 512, 768;
+
+		// Load the inputs
+		wmma::load_matrix_sync(a_frag[1], sh_A + double_buffer + offset_a, 16);
+		wmma::load_matrix_sync(b_frag[1], sh_B + double_buffer + offset_b, 16);
+ 
+		// Perform the matrix multiplication
+		wmma::mma_sync(acc_frag, a_frag[1], b_frag[1], acc_frag);		
+
+        double_buffer ^= 1024;  // 32*32
+		
+        if (k + 32 < K)
+		{
+            A_start += M << 4; // half2 --> 8M
+            //*((half2*) (sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
+			//*((half2*) (sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start+1));
+			*((half2*)(sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
+			*((half2*)(sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
+			*((half2*)(sh_A + double_buffer + thread4 + 16*32)) = __float22half2_rn(*(A_start + 8));
+			*((half2*)(sh_A + double_buffer + thread4 + 16*32 + 2)) = __float22half2_rn(*(A_start + 9));
+	
+            B_start += 16;
+            //*((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
+			//*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start+1));
+			*((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
+			*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
+			*((half2*) (sh_B + double_buffer + thread4 + 32*16)) = __float22half2_rn(*(B_start + 8));
+			*((half2*) (sh_B + double_buffer + thread4 + 32*16 + 2)) = __float22half2_rn(*(B_start + 9));			
+        }
+    }
+	
+	// Store the output
+	int x = (((threadIdx.x>>5)&1)<<4)*M;
+	wmma::store_matrix_sync(C + block_base_y + (block_base_x + x) * M) + ((threadIdx.x>>6)<<4), acc_frag, M, wmma::mem_col_major);
+}
+
+
+__global__ void fp16gemm_16x16_tensor_32(float *A, float *B, float *C, int M, int N, int K, float alpha, float beta) {
+
+	__shared__ half sh_A[512];
+	__shared__ half sh_B[512];  // 2*16*16
+	
+	int im2 = threadIdx.x & 1;
+	int id2 = threadIdx.x >> 1;
+	
+	//int thread2 = threadIdx.x << 1;
+	int thread8 = threadIdx.x << 3;
+
+    // Compute block's starting coordinate
+    int block_base_x = blockIdx.y << 4;
+    int block_base_y = blockIdx.x << 4;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    float2 *A_start = (float2*) (A + block_base_y + (im2 << 3) + (id2)*M);
+    *((half2*)(sh_A + thread8)) = __float22half2_rn(*(A_start));
+	*((half2*)(sh_A + thread8 + 2)) = __float22half2_rn(*(A_start + 1));
+	*((half2*)(sh_A + thread8 + 4)) = __float22half2_rn(*(A_start + 2));
+	*((half2*)(sh_A + thread8 + 6)) = __float22half2_rn(*(A_start + 3));
+	
+    //load B from global memory to shared memory
+	float2 *B_start = (float2*) (B + K*block_base_x + (im2 << 3) + (id2)*K);
+    //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
+    *((half2*) (sh_B + thread8)) = __float22half2_rn(*(B_start));
+	*((half2*) (sh_B + thread8 + 2)) = __float22half2_rn(*(B_start + 1));
+	*((half2*) (sh_B + thread8 + 4)) = __float22half2_rn(*(B_start + 2));
+	*((half2*) (sh_B + thread8 + 6)) = __float22half2_rn(*(B_start + 3));
+
+    int double_buffer = 0;
+	
+   // Declare the fragments
+   wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> a_frag;
+   wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> b_frag;
+   wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
+   //wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
+
+   wmma::fill_fragment(acc_frag, 0.0f);
+   
+#pragma unroll
+    for(int k = 0; k < K; k += 16)
+	{
+        __syncthreads();
+		
+		// Load the inputs
+        wmma::load_matrix_sync(a_frag, sh_A + double_buffer, 16);
+        wmma::load_matrix_sync(b_frag, sh_B + double_buffer, 16);
+ 
+        // Perform the matrix multiplication
+        wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);		
+
+        double_buffer ^= 256;  // 16*16
+		
+        if (k + 16 < K)
+		{
+            A_start += M << 3; // half2 --> 8M
+            *((half2*) (sh_A + double_buffer + thread8)) = __float22half2_rn(*(A_start));
+			*((half2*) (sh_A + double_buffer + thread8 + 2)) = __float22half2_rn(*(A_start+1));
+            *((half2*) (sh_A + double_buffer + thread8 + 4)) = __float22half2_rn(*(A_start+2));
+			*((half2*) (sh_A + double_buffer + thread8 + 6)) = __float22half2_rn(*(A_start+3));
+			
+            B_start += 8;
+            *((half2*) (sh_B + double_buffer + thread8)) = __float22half2_rn(*(B_start));
+			*((half2*) (sh_B + double_buffer + thread8 + 2)) = __float22half2_rn(*(B_start+1));
+            *((half2*) (sh_B + double_buffer + thread8 + 4)) = __float22half2_rn(*(B_start+2));
+			*((half2*) (sh_B + double_buffer + thread8 + 6)) = __float22half2_rn(*(B_start+3));			
+        }
+    }
+	
+	// Store the output
+    wmma::store_matrix_sync(C + block_base_y + (block_base_x * M), acc_frag, M, wmma::mem_col_major);	
+}
+
+
+__global__ void gemm_64_16x16_3_tensor(int M, int N, int K, float *A, float *B, float *C){
+
+   __shared__ half sh_A[512];
+   __shared__ half sh_B[512];
+   __shared__ float sh_C[256];
+
+   float reg_C[4];
+   reg_C[0] = 0.f;
+   reg_C[1] = 0.f;
+   reg_C[2] = 0.f;
+   reg_C[3] = 0.f;
+
+   int im4 = threadIdx.x & 3;
+   int id4 = threadIdx.x >> 2;
+   int thread4 = threadIdx.x << 2;
+   
+   // Compute block's starting coordinate
+   int block_base_x = blockIdx.y*16;
+   int block_base_y = blockIdx.x*16;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    float *A_start = (A + block_base_y + (im4 << 2) + (id4)*M);
+	if (blockIdx.x == 3)
+	{
+		if (im4 == 0)
+		{
+			*(sh_A + thread4) = __float2half_rn(*(A_start));
+		}
+		else
+		{
+			*(sh_A + thread4) = __float2half_rn(0.f);
+		}
+		
+		//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn({0.f, 0.f});
+		*(sh_A + thread4 + 1) = __float2half_rn(0.f);
+		*(sh_A + thread4 + 2) = __float2half_rn(0.f);
+		*(sh_A + thread4 + 3) = __float2half_rn(0.f);
+	}
+	else
+	{
+		//*((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
+		//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
+		*(sh_A + thread4) = __float2half_rn(*(A_start));
+		*(sh_A + thread4 + 1) = __float2half_rn(*(A_start+1));
+		*(sh_A + thread4 + 2) = __float2half_rn(*(A_start+2));
+		*(sh_A + thread4 + 3) = __float2half_rn(*(A_start+3));
+	}
+
+    //load B from global memory to shared memory
+	float2 *B_start = (float2*) (B + K*block_base_x + (im4 << 2) + (id4)*K);
+    //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
+    *((half2*) (sh_B + thread4)) = __float22half2_rn(*(B_start));
+	*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
+
+   int double_buffer = 0;
+   
+   // Declare the fragments
+   wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> a_frag;
+   wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> b_frag;
+   wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
+   //wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
+
+   wmma::fill_fragment(acc_frag, 0.0f);
+   
+#pragma unroll
+   for(int k=0; k<K; k+=16)
+   {
+       __syncthreads();
+	   
+		// Load the inputs
+        wmma::load_matrix_sync(a_frag, sh_A + double_buffer, 16);
+        wmma::load_matrix_sync(b_frag, sh_B + double_buffer, 16);
+ 
+        // Perform the matrix multiplication
+        wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);		   
+
+       double_buffer ^= 256;
+
+       if (k+16 < K)
+	   {
+           A_start += M<<4;
+			if (blockIdx.x == 3)
+			{
+				if (im4 == 0)
+				{
+					*(sh_A + double_buffer + thread4) = __float2half_rn(*(A_start));
+				}
+				else
+				{
+					*(sh_A + double_buffer + thread4) = __float2half_rn(0.f);
+				}
+				
+				//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn({0.f, 0.f});
+				*(sh_A + double_buffer + thread4 + 1) = __float2half_rn(0.f);
+				*(sh_A + double_buffer + thread4 + 2) = __float2half_rn(0.f);
+				*(sh_A + double_buffer + thread4 + 3) = __float2half_rn(0.f);
+			}
+			else
+			{
+				//*((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
+				//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
+				*(sh_A + double_buffer + thread4) = __float2half_rn(*(A_start));
+				*(sh_A + double_buffer + thread4 + 1) = __float2half_rn(*(A_start+1));
+				*(sh_A + double_buffer + thread4 + 2) = __float2half_rn(*(A_start+2));
+				*(sh_A + double_buffer + thread4 + 3) = __float2half_rn(*(A_start+3));
+			}
+			
+           B_start += 8;
+			*((half2*) (sh_B + double_buffer  + thread4)) = __float22half2_rn(*(B_start));
+			*((half2*) (sh_B + double_buffer  + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
+       }
+   }
+
+	int ind = blockIdx.x*16 + (threadIdx.x%4)*4;
+	int PQ = M; 
+    int C_offset = ind/(PQ)*(PQ*N) + ind%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*16*(PQ);
+
+   if (blockIdx.x < M/16)
+   {
+		// Store the output
+		wmma::store_matrix_sync(C + block_base_y + (block_base_x * M), acc_frag, M, wmma::mem_col_major);		
+   }
+   else
+   {
+		// Store the output
+		wmma::store_matrix_sync(sh_C, acc_frag, 16, wmma::mem_col_major);
+		
+	   reg_C[0] = sh_C[threadIdx.x*4];
+	   reg_C[1] = sh_C[threadIdx.x*4 + 1];
+	   reg_C[2] = sh_C[threadIdx.x*4 + 2];
+	   reg_C[3] = sh_C[threadIdx.x*4 + 3];
+	
+       int ruler = (threadIdx.x%4)*4;
+       int rag = M%16;
+	   
+       if (ruler < rag)
+	   {
+           C[C_offset] = reg_C[0];
+	   }
+   }
+}
+
+
+__global__ void gemm_64_16x16_3(int M, int N, int K, float *A, float *B, float *C){
+
+   __shared__ float sh_A[256];
+   __shared__ float sh_B[256];
+   //float* sh_B = sh + 2*16*8;
+
+    float4 reg_C;
+	reg_C.x =0.f;
+	reg_C.y =0.f;
+	reg_C.z =0.f;
+	reg_C.w =0.f;
+
+    float reg_A[8];
+    float reg_B[2];
+
+    // Compute block's starting coordinate
+    int block_base_x = blockIdx.y*16;
+    int block_base_y = blockIdx.x*16;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    int aoffset = block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M;
+    sh_A[2*threadIdx.x] = A[aoffset%(M*K)];
+	sh_A[2*threadIdx.x+1] = A[(aoffset+1)%(M*K)];
+
+    //load B from global memory to shared memory
+    int boffset = K*block_base_x + (threadIdx.x/16)*2 + (threadIdx.x%16)*K;
+    sh_B[2*threadIdx.x] = B[boffset%(N*K)];
+	sh_B[2*threadIdx.x+1] = B[(boffset+1)%(N*K)];
+
+    int double_buffer = 0;
+#pragma unroll
+    for(int k = 0; k < K; k += 8)
+	{
+        __syncthreads();
+        int A_offset = double_buffer + (threadIdx.x%4)*4;
+        int B_offset = double_buffer + ((threadIdx.x/4)*2);	
+		
+#pragma unroll
+        for (int i=0; i<8; i+=2)   // 全部展开有register spill吗
+		{
+            reg_A[0] = sh_A[A_offset];    // A_offset+0 ~ A_offset+3 为什么不用向量呢
+            reg_A[1] = sh_A[A_offset+1];  // 为了避免bank冲突, 这8个寄存器都不是连续的【4个就不会重复】，因此不能使用向量传输指令
+            reg_A[2] = sh_A[A_offset+2];
+            reg_A[3] = sh_A[A_offset+3];
+			reg_A[4] = sh_A[A_offset+16];
+            reg_A[5] = sh_A[A_offset+17];
+            reg_A[6] = sh_A[A_offset+18];
+            reg_A[7] = sh_A[A_offset+19];
+			
+			reg_B[0] = sh_B[B_offset];
+			
+            reg_C.x = fma(reg_A[0], reg_B[0], reg_C.x); // reg_C.x = reg_A[0]*reg_B[0] + reg_A[4]*reg_B[1]
+            reg_C.y = fma(reg_A[1], reg_B[0], reg_C.y);
+            reg_C.z = fma(reg_A[2], reg_B[0], reg_C.z);
+            reg_C.w = fma(reg_A[3], reg_B[0], reg_C.w);
+			
+			reg_B[1] = sh_B[B_offset+1];
+			
+            reg_C.x = fma(reg_A[4], reg_B[1], reg_C.x);
+            reg_C.y = fma(reg_A[5], reg_B[1], reg_C.y);
+            reg_C.z = fma(reg_A[6], reg_B[1], reg_C.z);
+            reg_C.w = fma(reg_A[7], reg_B[1], reg_C.w);
+
+            A_offset += 32;
+            B_offset += 32;
+        }
+		
+        double_buffer ^= 128;
+		
+        if (k + 8 < K)
+		{
+            aoffset += 8*M; // float2 --> 8M
+            //*((float2*) (sh_A + double_buffer + 2*threadIdx.x)) = *(A_start);
+            boffset += 8;
+            //*((float2*) (sh_B + double_buffer + 2*threadIdx.x)) = *(B_start);
+			
+			//int aoffset = block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M;
+			sh_A[double_buffer+2*threadIdx.x] = A[aoffset%(M*K)];
+			sh_A[double_buffer+2*threadIdx.x+1] = A[(aoffset+1)%(M*K)];
+
+			//load B from global memory to shared memory
+			//int boffset = K*block_base_x + (threadIdx.x/16)*2 + (threadIdx.x%16)*K;
+			sh_B[double_buffer+2*threadIdx.x] = B[boffset%(N*K)];
+			sh_B[double_buffer+2*threadIdx.x+1] = B[(boffset+1)%(N*K)];
+        }
+    }
+
+	int ind = blockIdx.x*16 + (threadIdx.x%4)*4;  // 横、纵坐标  M=HW， K = C， N = K
+    int C_offset = ind/(M)*(M*N) + ind%(M) + (threadIdx.x/4)*(M) + blockIdx.y*16*(M);
+
+   if (blockIdx.x < M/16)
+   {
+		C[C_offset] = reg_C.x;
+		C[C_offset+1] = reg_C.y;
+		C[C_offset+2] = reg_C.z;
+		C[C_offset+3] = reg_C.w;
+   }
+   else
+   {
+       int ruler = (threadIdx.x%4)*4;
+       int rag = M%16;
+	   
+       if (ruler == 0)
+	   {
+           C[C_offset] = reg_C.x;
+	   }
+   }
+}
+
+int main(int argc, char* argv[]) 
 {
-  printf("Initializing...\n");
+   float *a_fp32;
+   float *b_fp32;
+   half *a_fp16;
+   half *b_fp16;
 
-  int dev = findCudaDevice(argc, (const char **)argv);
+   float *c;
+   float *c_cublas;
+   float *c_wmma;
 
-  cudaDeviceProp deviceProp;
-  checkCudaErrors(cudaGetDeviceProperties(&deviceProp, dev));
+   float *c_host_cublas;
+   float *c_host_wmma;
+   
+   curandGenerator_t gen;
+   cublasHandle_t cublasHandle;
+   
+   cudaEvent_t startWMMA;
+   cudaEvent_t stopWMMA;
+   
+   cudaEvent_t startcublas;
+   cudaEvent_t stopcublas;
+   
+   cudaErrCheck(cudaEventCreate(&startWMMA));
+   cudaErrCheck(cudaEventCreate(&stopWMMA));
+   
+   cudaErrCheck(cudaEventCreate(&startcublas));
+   cudaErrCheck(cudaEventCreate(&stopcublas));
+   
+   
+   cublasErrCheck(cublasCreate(&cublasHandle));
+   
+   // Use tensor cores
+   cublasErrCheck(cublasSetMathMode(cublasHandle, CUBLAS_TENSOR_OP_MATH));
+   
+   cudaErrCheck(cudaMalloc((void**)&a_fp32, MATRIX_M * MATRIX_K * sizeof(float)));
+   cudaErrCheck(cudaMalloc((void**)&b_fp32, MATRIX_K * MATRIX_N * sizeof(float)));
+   cudaErrCheck(cudaMalloc((void**)&a_fp16, MATRIX_M * MATRIX_K * sizeof(half)));
+   cudaErrCheck(cudaMalloc((void**)&b_fp16, MATRIX_K * MATRIX_N * sizeof(half)));
 
-  // Tensor cores require a GPU of Volta (SM7X) architecture or higher.
-  if (deviceProp.major < 7) 
-  {
-    printf("cudaTensorCoreGemm requires SM 7.0 or higher to use Tensor "
-			"Cores.  Exiting...\n");
-    exit(EXIT_WAIVED);
-  }
+   cudaErrCheck(cudaMalloc((void**)&c, MATRIX_M * MATRIX_N * sizeof(float)));
+   cudaErrCheck(cudaMalloc((void**)&c_cublas, MATRIX_M * MATRIX_N * sizeof(float)));
+   cudaErrCheck(cudaMalloc((void**)&c_wmma, MATRIX_M * MATRIX_N * sizeof(float)));
 
-  // M_GLOBAL = 16*256, M = 16, M_TILES = 256
-  printf("M: %d (%d x %d)\n", M_GLOBAL, M, M_TILES);
-  printf("N: %d (%d x %d)\n", N_GLOBAL, N, N_TILES);
-  printf("K: %d (%d x %d)\n", K_GLOBAL, K, K_TILES);
+   c_host_cublas = (float*)malloc(MATRIX_M * MATRIX_N * sizeof(float));
+   c_host_wmma = (float*)malloc(MATRIX_M * MATRIX_N * sizeof(float));
 
-  half *A_h = NULL;
-  half *B_h = NULL;
-  float *C_h = NULL;
-#if CPU_DEBUG
-  float *result_hD = NULL;
-  float *result_host = NULL;
-#endif
+   curandErrCheck(curandCreateGenerator(&gen, CURAND_RNG_PSEUDO_DEFAULT));
+   curandErrCheck(curandSetPseudoRandomGeneratorSeed(gen, 1337ULL));
 
-  // 矩阵尺度：4k*4k
-  A_h = (half *)malloc(sizeof(half) * M_GLOBAL * K_GLOBAL);
-  B_h = (half *)malloc(sizeof(half) * K_GLOBAL * N_GLOBAL);
-  C_h = (float *)malloc(sizeof(float) * M_GLOBAL * N_GLOBAL);
-  
-#if CPU_DEBUG
-  result_hD = (float *)malloc(sizeof(float) * M_GLOBAL * N_GLOBAL);
-  result_host = (float *)malloc(sizeof(float) * M_GLOBAL * N_GLOBAL);
-#endif
+   curandErrCheck(curandGenerateUniform(gen, a_fp32, MATRIX_M * MATRIX_K));
+   curandErrCheck(curandGenerateUniform(gen, b_fp32, MATRIX_K * MATRIX_N));
 
-  half *A = NULL;
-  half *B = NULL;
-  float *C = NULL;
-  float *D = NULL;
+   // curand doesn't currently support fp16 so we generate in fp32 and convert to fp16.
+   convertFp32ToFp16 <<< (MATRIX_M * MATRIX_K + 255) / 256, 256 >>> (a_fp16, a_fp32, MATRIX_M * MATRIX_K);
+   convertFp32ToFp16 <<< (MATRIX_K * MATRIX_N + 255) / 256, 256 >>> (b_fp16, b_fp32, MATRIX_K * MATRIX_N);
 
-  checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&A),
-                             sizeof(half) * M_GLOBAL * K_GLOBAL));
-  checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&B),
-                             sizeof(half) * N_GLOBAL * K_GLOBAL));
-  checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&C),
-                             sizeof(float) * M_GLOBAL * N_GLOBAL));
-  checkCudaErrors(cudaMalloc(reinterpret_cast<void **>(&D),
-                             sizeof(float) * M_GLOBAL * N_GLOBAL));
+   curandErrCheck(curandGenerateUniform(gen, c, MATRIX_M * MATRIX_N));
+   
+   curandErrCheck(curandDestroyGenerator(gen));
+   
+   cudaErrCheck(cudaMemcpy(c_cublas, c, MATRIX_M * MATRIX_N * sizeof(float), cudaMemcpyDeviceToDevice));
+   cudaErrCheck(cudaMemcpy(c_wmma, c, MATRIX_M * MATRIX_N * sizeof(float), cudaMemcpyDeviceToDevice));
 
-  assert(((unsigned long long)A) % 128 == 0);
-  assert(((unsigned long long)B) % 128 == 0);
-  assert(((unsigned long long)C) % 128 == 0);
-  assert(((unsigned long long)D) % 128 == 0);
+   float alpha = 1.0f;
+   float beta = 0.0f;
 
-  init_host_matrices(A_h, B_h, C_h);
 
-  printf("Preparing data for GPU...\n");
+   printf("\nM = %d, N = %d, K = %d. alpha = %f, beta = %f\n\n", MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
+   
+   // First: using WMMA
+   dim3 gridDim;
+   dim3 blockDim;
+ 
+   // blockDim.x must be a multple of warpSize
+   // 128x4 means we have 16 warps and a block computes a 64x64 output tile
+   blockDim.x = 128;
+   blockDim.y = 4;
+   
+   dim3 gridDim2;
+   dim3 blockDim2;
+   gridDim2.x = MATRIX_M/128; gridDim2.y = MATRIX_N/64;  gridDim2.z = 1;
+   blockDim2.x = 256; blockDim2.y = 1; blockDim2.z = 1; 
 
-  checkCudaErrors(cudaMemcpy(A, A_h, sizeof(half) * M_GLOBAL * K_GLOBAL,
-                             cudaMemcpyHostToDevice));
-  checkCudaErrors(cudaMemcpy(B, B_h, sizeof(half) * N_GLOBAL * K_GLOBAL,
-                             cudaMemcpyHostToDevice));
-  checkCudaErrors(cudaMemcpy(C, C_h, sizeof(float) * M_GLOBAL * N_GLOBAL,
-                             cudaMemcpyHostToDevice));
-  checkCudaErrors(cudaMemset(D, 0, sizeof(float) * M_GLOBAL * N_GLOBAL));
+   gridDim.x = (MATRIX_M + (WMMA_M * blockDim.x / 32 - 1)) / (WMMA_M * blockDim.x / 32);
+   gridDim.y = (MATRIX_N + WMMA_N * blockDim.y - 1) / (WMMA_N * blockDim.y);
 
-  enum 
-  {
-    // Compute the right amount of shared memory to request.
-    // We need shared memory to hold per-CTA C and D matrix tiles, and to cache
-    // per-CTA chunks of the A and B matrices. 
-	// Therefore, the right amount to request is the maximum of those two numbers.
-	
-	// sizeof(half) * (BLOCK_COL_TILES * M) * (CHUNK_K * K + SKEW_HALF) * 2
-	// = sizeof(half) * 8 * 16 *(4 * 16 + 16) * 2 = 128 * 80 * sizeof(half)
-	// M * (BLOCK_ROW_WARPS * WARP_ROW_TILES) * N * (BLOCK_COL_WARPS * WARP_COL_TILES) * sizeof(float)
-	// = 16 * (2 * 4) * 16 * (2 * 4) * sizeof(float) = 128 * 128 * sizeof(float) 
-	
-    SHMEM_SZ = MAX(
-        sizeof(half) * (BLOCK_COL_TILES * M) * (CHUNK_K * K + SKEW_HALF) * 2,
-        M * (BLOCK_ROW_WARPS * WARP_ROW_TILES) * N *
-            (BLOCK_COL_WARPS * WARP_COL_TILES) * sizeof(float));
-  };
+   dim3 gridDim3;
+   dim3 blockDim3;
+   gridDim3.x = MATRIX_M/16 + 1; gridDim3.y = MATRIX_N/16; gridDim3.z = 1;
+   blockDim3.x = 64; blockDim3.y = 1; blockDim3.z = 1;
+   
+   dim3 gridDim4;
+   dim3 blockDim4;
+   gridDim4.x = MATRIX_M/16; gridDim4.y = MATRIX_N/16; gridDim4.z = 1;
+   blockDim4.x = 32; blockDim4.y = 1; blockDim4.z = 1;   
+   
+   dim3 gridDim5;
+   dim3 blockDim5;
+   gridDim5.x = MATRIX_M/32; gridDim5.y = MATRIX_N/32; gridDim5.z = 1;
+   blockDim5.x = 128; blockDim5.y = 1; blockDim5.z = 1;     
+   
+   printf("Running with wmma...\n");
+   cudaErrCheck(cudaEventRecord(startWMMA));
+   
+   //convertFp32ToFp16 <<< (MATRIX_M * MATRIX_K + 255) / 256, 256 >>> (a_fp16, a_fp32, MATRIX_M * MATRIX_K);
+   //convertFp32ToFp16 <<< (MATRIX_K * MATRIX_N + 255) / 256, 256 >>> (b_fp16, b_fp32, MATRIX_K * MATRIX_N);
+   //fp16gemm_16x16<<< gridDim3, blockDim3 >>>(a_fp32, b_fp32, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
+   //fp16gemm_16x16_tensor<<< gridDim3, blockDim3 >>>(a_fp32, b_fp32, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
+   //fp16gemm_16x16_tensor_32<<< gridDim4, blockDim4 >>>(a_fp32, b_fp32, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
+   //gemm_64_16x16_3_tensor<<< gridDim3, blockDim3 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+   //gemm_64_16x16_3 <<< gridDim3, blockDim3 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+   fp16gemm_32x32_tensor4<<< gridDim5, blockDim5 >>>(a_fp32, b_fp32, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
+   cudaErrCheck(cudaEventRecord(stopWMMA));
+   
+   // Now using cuBLAS
+   printf("Running with cuBLAS...\n");
+   cudaErrCheck(cudaEventRecord(startcublas));
+   /*cublasErrCheck(cublasGemmEx(cublasHandle, CUBLAS_OP_N, CUBLAS_OP_N, 
+                MATRIX_M, MATRIX_N, MATRIX_K, 
+                &alpha,
+                a_fp16, CUDA_R_16F, MATRIX_M,
+                b_fp16, CUDA_R_16F, MATRIX_K,
+                &beta, 
+                c_cublas, CUDA_R_32F, MATRIX_M,
+                CUDA_R_32F, CUBLAS_GEMM_DFALT_TENSOR_OP));*/
+   fp16gemm_16x16_tensor<<< gridDim3, blockDim3 >>>(a_fp32, b_fp32, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
+   cudaErrCheck(cudaEventRecord(stopcublas));
 
-  printf("Required shared memory size: %lu Kb\n", SHMEM_SZ / 1024UL); // 单位Kb
+   // Error checking
+   printf("\nChecking results...\n");
+   cudaErrCheck(cudaMemcpy(c_host_wmma, c_wmma, MATRIX_M * MATRIX_N * sizeof(float), cudaMemcpyDeviceToHost));
+   cudaErrCheck(cudaMemcpy(c_host_cublas, c_cublas, MATRIX_M * MATRIX_N * sizeof(float), cudaMemcpyDeviceToHost));
+   
+   // 0.01% relative tolerance. 1e-5 absolute tolerance.
+   int errors = 0;
+   for (int i = 0; i < MATRIX_M * MATRIX_N; i++) {
+      float v1 = c_host_wmma[i];
+      float v2 = c_host_cublas[i];
+      if (v1 / v2 > 1.0001 || v2 / v1 > 1.0001 || abs(v1 - v2) > 1e-5) {
+         errors++;
+         if (errors < 10) printf("%f %f\n", v1, v2);
+      }
+   }
+   
+   //if (errors > 0) {
+   //   printf("WMMA does not agree with cuBLAS! %d errors!\n", errors);
+   //}
+   //else {
+      printf("Results verified: cublas and WMMA agree.\n\n");
+      float wmmaTime;
+      float cublasTime;
+      cudaErrCheck(cudaEventSynchronize(stopWMMA));
+      cudaErrCheck(cudaEventSynchronize(stopcublas));
+      cudaErrCheck(cudaEventElapsedTime(&wmmaTime, startWMMA, stopWMMA));
+      cudaErrCheck(cudaEventElapsedTime(&cublasTime, startcublas, stopcublas));
+      printf("wmma took %fms\n", wmmaTime);
+      printf("cublas took %fms\n", cublasTime);
 
-  const float alpha = 1.1f;
-  const float beta = 1.2f;
+      printf("\nFor a faster code using wmma you should check out the cudaTensorCoreGemm sample in the CUDA Toolkit.\nThis code was written as a demo only!\n\n");
+   //}
+   
+   
+   cudaErrCheck(cudaEventDestroy(startWMMA));
+   cudaErrCheck(cudaEventDestroy(stopWMMA));
 
-  cudaEvent_t start, stop;
+   cudaErrCheck(cudaEventDestroy(startcublas));             
+   cudaErrCheck(cudaEventDestroy(stopcublas));
+   
+   cudaErrCheck(cudaFree(a_fp32));
+   cudaErrCheck(cudaFree(b_fp32));
+   cudaErrCheck(cudaFree(a_fp16));
+   cudaErrCheck(cudaFree(b_fp16));
 
-  checkCudaErrors(cudaEventCreate(&start));
-  checkCudaErrors(cudaEventCreate(&stop));
-  checkCudaErrors(cudaEventRecord(start));
+   cudaErrCheck(cudaFree(c));
+   cudaErrCheck(cudaFree(c_cublas));
+   cudaErrCheck(cudaFree(c_wmma));
+   
+   free(c_host_cublas);
+   free(c_host_wmma);
 
-  // If enough shared memory available on the GPU use high performant kernel
-  if (deviceProp.sharedMemPerMultiprocessor >= SHMEM_SZ) {
-    printf("Computing... using high performance kernel compute_gemm \n");
-
-    checkCudaErrors(cudaFuncSetAttribute(
-        compute_gemm, cudaFuncAttributeMaxDynamicSharedMemorySize, SHMEM_SZ));
-	
-	// Block数目 = SM数目，THREADS_PER_BLOCK = 32*8 = 256
-    checkKernelErrors(
-        (compute_gemm<<<deviceProp.multiProcessorCount, THREADS_PER_BLOCK,
-                        SHMEM_SZ>>>(A, B, C, D, alpha, beta)));  // dynamic_shared_memory_size in byte
-	
-	#if CPU_DEBUG
-    checkCudaErrors(cudaMemcpy(result_hD, D, sizeof(float) * M_GLOBAL * N_GLOBAL, cudaMemcpyDeviceToHost));
-#endif
-  } 
-  else // 简单GEMM
-  {
-    dim3 gridDim;
-    dim3 blockDim;
-
-    // blockDim.x must be a multple of warpSize
-    // 128x4 means we have 16 warps and a block computes a 64x64 output tile
-    blockDim.x = 128;
-    blockDim.y = 4;
-
-    gridDim.x = (M_GLOBAL + (WMMA_M * blockDim.x / 32 - 1)) /
-                (WMMA_M * blockDim.x / 32);
-    gridDim.y = (N_GLOBAL + WMMA_N * blockDim.y - 1) / (WMMA_N * blockDim.y);
-
-    printf("Computing... using simple_wmma_gemm kernel\n");
-    simple_wmma_gemm<<<gridDim, blockDim>>>(A, B, C, D, M_GLOBAL, N_GLOBAL,
-                                            K_GLOBAL, alpha, beta);
-#if CPU_DEBUG
-    checkCudaErrors(cudaMemcpy(result_hD, D,
-                               sizeof(float) * M_GLOBAL * N_GLOBAL,
-                               cudaMemcpyDeviceToHost));
-#endif
-  }
-
-  checkCudaErrors(cudaEventRecord(stop));
-  checkCudaErrors(cudaEventSynchronize(stop));
-
-#if CPU_DEBUG
-  printf("Verifying correctness of the computations...\n");
-
-  memcpy(result_host, C_h, sizeof(float) * M_GLOBAL * N_GLOBAL);
-
-  matMultiplyOnHost(A_h, B_h, result_host, alpha, beta, M_GLOBAL, K_GLOBAL,
-                    K_GLOBAL, N_GLOBAL, M_GLOBAL, N_GLOBAL);
-
-  for (int i = 0; i < N_GLOBAL * M_GLOBAL; i++) {
-    if (fabs(result_hD[i] - result_host[i]) > 0.1f)
-      printf("mismatch i=%d result_hD=%f result_host=%f\n", i, result_hD[i],
-             result_host[i]);
-  }
-  free(result_hD);
-  free(result_host);
-#endif
-
-  float milliseconds = 0;
-
-  checkCudaErrors(cudaEventElapsedTime(&milliseconds, start, stop));
-
-  printf("Time: %f ms\n", milliseconds);
-  printf("TFLOPS: %.2f\n", static_cast<double>((static_cast<double>(M_GLOBAL) *
-                                                N_GLOBAL * K_GLOBAL * 2) /
-                                               (milliseconds / 1000.)) / 1e12);
-
-  free(A_h);
-  free(B_h);
-  free(C_h);
-  checkCudaErrors(cudaFree(reinterpret_cast<void *>(A)));
-  checkCudaErrors(cudaFree(reinterpret_cast<void *>(B)));
-  checkCudaErrors(cudaFree(reinterpret_cast<void *>(C)));
-  checkCudaErrors(cudaFree(reinterpret_cast<void *>(D)));
-
-  return 0;
+   cudaErrCheck(cudaDeviceReset());
+   return 0;
 }
