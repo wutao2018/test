@@ -240,6 +240,78 @@ __global__ void fp16gemm_16x16_tensor(float *A, float *B, float *C, int M, int N
     wmma::store_matrix_sync(C + block_base_y + (block_base_x * M), acc_frag, M, wmma::mem_col_major);	
 }
 
+__global__ void fp16gemm_16x16_tensor2(float *A, float *B, float *C, int M, int N, int K, float alpha, float beta) {
+
+	__shared__ half sh_A[512];
+	__shared__ half sh_B[512];  // 2*16*16
+	
+	int im4 = threadIdx.x & 3;
+	int id4 = threadIdx.x >> 2;
+	
+	//int thread2 = threadIdx.x << 1;
+	int thread4 = threadIdx.x << 2;
+
+    // Compute block's starting coordinate
+    int block_base_x = blockIdx.y << 4;
+    int block_base_y = blockIdx.x << 4;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    float2 *A_start = (float2*) (A + block_base_y + (im4 << 2) + (id4)*M);
+    *((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
+	*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
+
+    //load B from global memory to shared memory
+	float2 *B_start = (float2*) (B + K*block_base_x + (im4 << 2) + (id4)*K);
+    //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
+    *((half2*) (sh_B + thread4)) = __float22half2_rn(*(B_start));
+	*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
+
+    int double_buffer = 0;
+   
+#pragma unroll
+    for(int k = 0; k < K; k += 16)
+	{
+        __syncthreads();
+		
+		if (threadIdx.x < 32)
+		{
+		   // Declare the fragments
+		   wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> a_frag;
+		   wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> b_frag;
+		   wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
+		   //wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
+
+		   wmma::fill_fragment(acc_frag, 0.0f);		
+			
+			// Load the inputs
+			wmma::load_matrix_sync(a_frag, sh_A + double_buffer, 16);
+			wmma::load_matrix_sync(b_frag, sh_B + double_buffer, 16);
+	 
+			// Perform the matrix multiplication
+			wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);	
+       }		
+
+        double_buffer ^= 256;  // 16*16
+		
+        if (k + 16 < K)
+		{
+            A_start += M << 3; // half2 --> 8M
+            *((half2*) (sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
+			*((half2*) (sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start+1));
+			
+            B_start += 8;
+            *((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
+			*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start+1));
+        }
+    }
+	
+	// Store the output
+	if (threadIdx.x < 32)
+	{	
+		wmma::store_matrix_sync(C + block_base_y + (block_base_x * M), acc_frag, M, wmma::mem_col_major);
+	}
+}
+
 
 __global__ void fp16gemm_16x16_tensor_32(float *A, float *B, float *C, int M, int N, int K, float alpha, float beta) {
 
@@ -250,7 +322,7 @@ __global__ void fp16gemm_16x16_tensor_32(float *A, float *B, float *C, int M, in
 	int id2 = threadIdx.x >> 1;
 	
 	//int thread2 = threadIdx.x << 1;
-	int thread4 = threadIdx.x << 2;
+	int thread8 = threadIdx.x << 3;
 
     // Compute block's starting coordinate
     int block_base_x = blockIdx.y << 4;
@@ -258,18 +330,18 @@ __global__ void fp16gemm_16x16_tensor_32(float *A, float *B, float *C, int M, in
 
     //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
     float2 *A_start = (float2*) (A + block_base_y + (im2 << 3) + (id2)*M);
-    *((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
-	*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
-	*((half2*)(sh_A + thread4 + 4)) = __float22half2_rn(*(A_start + 2));
-	*((half2*)(sh_A + thread4 + 6)) = __float22half2_rn(*(A_start + 3));
+    *((half2*)(sh_A + thread8)) = __float22half2_rn(*(A_start));
+	*((half2*)(sh_A + thread8 + 2)) = __float22half2_rn(*(A_start + 1));
+	*((half2*)(sh_A + thread8 + 4)) = __float22half2_rn(*(A_start + 2));
+	*((half2*)(sh_A + thread8 + 6)) = __float22half2_rn(*(A_start + 3));
 	
     //load B from global memory to shared memory
 	float2 *B_start = (float2*) (B + K*block_base_x + (im2 << 3) + (id2)*K);
     //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
-    *((half2*) (sh_B + thread4)) = __float22half2_rn(*(B_start));
-	*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
-	*((half2*) (sh_B + thread4 + 4)) = __float22half2_rn(*(B_start + 2));
-	*((half2*) (sh_B + thread4 + 6)) = __float22half2_rn(*(B_start + 3));
+    *((half2*) (sh_B + thread8)) = __float22half2_rn(*(B_start));
+	*((half2*) (sh_B + thread8 + 2)) = __float22half2_rn(*(B_start + 1));
+	*((half2*) (sh_B + thread8 + 4)) = __float22half2_rn(*(B_start + 2));
+	*((half2*) (sh_B + thread8 + 6)) = __float22half2_rn(*(B_start + 3));
 
     int double_buffer = 0;
 	
@@ -298,16 +370,16 @@ __global__ void fp16gemm_16x16_tensor_32(float *A, float *B, float *C, int M, in
         if (k + 16 < K)
 		{
             A_start += M << 3; // half2 --> 8M
-            *((half2*) (sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
-			*((half2*) (sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start+1));
-            *((half2*) (sh_A + double_buffer + thread4 + 4)) = __float22half2_rn(*(A_start+2));
-			*((half2*) (sh_A + double_buffer + thread4 + 6)) = __float22half2_rn(*(A_start+3));
+            *((half2*) (sh_A + double_buffer + thread8)) = __float22half2_rn(*(A_start));
+			*((half2*) (sh_A + double_buffer + thread8 + 2)) = __float22half2_rn(*(A_start+1));
+            *((half2*) (sh_A + double_buffer + thread8 + 4)) = __float22half2_rn(*(A_start+2));
+			*((half2*) (sh_A + double_buffer + thread8 + 6)) = __float22half2_rn(*(A_start+3));
 			
             B_start += 8;
-            *((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
-			*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start+1));
-            *((half2*) (sh_A + double_buffer + thread4 + 4)) = __float22half2_rn(*(A_start+2));
-			*((half2*) (sh_A + double_buffer + thread4 + 6)) = __float22half2_rn(*(A_start+3));			
+            *((half2*) (sh_B + double_buffer + thread8)) = __float22half2_rn(*(B_start));
+			*((half2*) (sh_B + double_buffer + thread8 + 2)) = __float22half2_rn(*(B_start+1));
+            *((half2*) (sh_B + double_buffer + thread8 + 4)) = __float22half2_rn(*(B_start+2));
+			*((half2*) (sh_B + double_buffer + thread8 + 6)) = __float22half2_rn(*(B_start+3));			
         }
     }
 	
@@ -680,14 +752,15 @@ int main(int argc, char* argv[])
    // Now using cuBLAS
    printf("Running with cuBLAS...\n");
    cudaErrCheck(cudaEventRecord(startcublas));
-   cublasErrCheck(cublasGemmEx(cublasHandle, CUBLAS_OP_N, CUBLAS_OP_N, 
+   /*cublasErrCheck(cublasGemmEx(cublasHandle, CUBLAS_OP_N, CUBLAS_OP_N, 
                 MATRIX_M, MATRIX_N, MATRIX_K, 
                 &alpha,
                 a_fp16, CUDA_R_16F, MATRIX_M,
                 b_fp16, CUDA_R_16F, MATRIX_K,
                 &beta, 
                 c_cublas, CUDA_R_32F, MATRIX_M,
-                CUDA_R_32F, CUBLAS_GEMM_DFALT_TENSOR_OP));
+                CUDA_R_32F, CUBLAS_GEMM_DFALT_TENSOR_OP));*/
+   fp16gemm_16x16_tensor<<< gridDim3, blockDim3 >>>(a_fp32, b_fp32, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
    cudaErrCheck(cudaEventRecord(stopcublas));
 
    // Error checking
