@@ -1050,10 +1050,12 @@ __global__ void fp16gemm_16x16_tensor2(float *A, float *B, float *C, int M, int 
     int block_base_x = blockIdx.y << 4;
     int block_base_y = blockIdx.x << 4;
 
+	float2 *A_start = (float2*) (A + block_base_y + (threadIdx.x%2)*8 + (threadIdx.x/2)*M);
+	float2 *B_start = (float2*) (B + K*block_base_x + (threadIdx.x%2)*8 + (threadIdx.x/2)*K);
     //load A from global memory to shared memory
 	if (threadIdx.x <32)
 	{
-		float2 *A_start = (float2*) (A + block_base_y + (threadIdx.x%2)*8 + (threadIdx.x/2)*M);
+		
 		*((half2*)(sh_A + thread8)) = __float22half2_rn(*(A_start));
 		*((half2*)(sh_A + thread8 + 4)) = __float22half2_rn(*(A_start + 2));
 		*((half2*)(sh_A + thread8 + 2)) = __float22half2_rn(*(A_start + 1));
@@ -1062,7 +1064,7 @@ __global__ void fp16gemm_16x16_tensor2(float *A, float *B, float *C, int M, int 
 	else
 	{
 		//load B from global memory to shared memory
-		float2 *B_start = (float2*) (B + K*block_base_x + (threadIdx.x%2)*8 + (threadIdx.x/2)*K);
+		
 		//float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
 		*((half2*) (sh_B + thread8)) = __float22half2_rn(*(B_start));
 		*((half2*) (sh_B + thread8 + 4)) = __float22half2_rn(*(B_start + 2));
