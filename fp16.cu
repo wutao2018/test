@@ -1167,8 +1167,8 @@ __global__ void gemm_64_16x16_3_tensor(int M, int N, int K, float *A, float *B, 
    int im8 = threadIdx.x & 7;
    int id8 = threadIdx.x >> 3;
 	
+   int thread2 = threadIdx.x << 1;
    //int thread4 = threadIdx.x << 2;
-   int thread4 = threadIdx.x << 2;
    
    // Compute block's starting coordinate
    int block_base_x = blockIdx.y*16;
@@ -1180,17 +1180,22 @@ __global__ void gemm_64_16x16_3_tensor(int M, int N, int K, float *A, float *B, 
 	float2 *A_start = (float2*) (A + block_base_y + (im8 << 1) + (id8)*M);
 	if (block_base_y == 3)
 	{
-		if (id4 == 0)
-			*((half2*)(sh_A + thread2)) = __float22half2_rn({(*(A_start)).x, 0.f});
-		*((half2*)(sh_A + thread2 + 128)) = __float22half2_rn({0.f, 0.f});
+		if (id8 == 0)
+		{
+			*((half*)(sh_A + thread2)) = __float2half2_rn(*(A_start).x);
+			*((half*)(sh_A + thread2 + 128)) = __float2half2_rn(*(A_start+4*M).x);
+		}
+		*((half*)(sh_A + thread2 + 1)) = __float2half2_rn(0.f);
+		*((half*)(sh_A + thread2 + 129)) = __float2half2_rn(0.f);
 	}
 	else
 	{
 		//*((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
 		//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
-		  
-    		*((half2*)(sh_A + thread2)) = __float22half2_rn(*(A_start));    
-    		*((half2*)(sh_A + thread2 + 128)) = __float22half2_rn(*(A_start + 4*M));   
+		*((half*)(sh_A + thread2)) = __float2half2_rn(*(A_start).x);
+    		*((half*)(sh_A + thread2 + 1)) = __float2half2_rn(*(A_start).y); 
+    		*((half*)(sh_A + thread2 + 128)) = __float2half2_rn(*(A_start + 4*M).x);
+		*((half*)(sh_A + thread2 + 129)) = __float2half2_rn(*(A_start + 4*M).y);  
 	}
 
     //load B from global memory to shared memory
@@ -1228,14 +1233,20 @@ __global__ void gemm_64_16x16_3_tensor(int M, int N, int K, float *A, float *B, 
            A_start += M<<3;
 			if (block_base_y == 3)
 			{
-				if (id4 == 0)
-					*((half2*)(sh_A + double_buffer  + thread2)) = __float22half2_rn({(*(A_start)).x, 0.f});
-				*((half2*)(sh_A + double_buffer  + thread2 + 128)) = __float22half2_rn({0.f, 0.f});
+				if (id8 == 0)
+				{
+					*((half*)(sh_A + thread2)) = __float2half2_rn(*(A_start).x);
+					*((half*)(sh_A + thread2 + 128)) = __float2half2_rn(*(A_start+4*M).x);
+				}
+				*((half*)(sh_A + thread2 + 1)) = __float2half2_rn(0.f);
+				*((half*)(sh_A + thread2 + 129)) = __float2half2_rn(0.f);
 			}
 			else
 			{
-				*((half2*)(sh_A + double_buffer  + thread2)) = __float22half2_rn(*(A_start));
-				*((half2*)(sh_A + double_buffer  + thread2 + 128)) = __float22half2_rn(*(A_start + 4*M));		
+				*((half*)(sh_A + thread2)) = __float2half2_rn(*(A_start).x);
+				*((half*)(sh_A + thread2 + 1)) = __float2half2_rn(*(A_start).y); 
+				*((half*)(sh_A + thread2 + 128)) = __float2half2_rn(*(A_start + 4*M).x);
+				*((half*)(sh_A + thread2 + 129)) = __float2half2_rn(*(A_start + 4*M).y);  		
 			}
 			
            B_start += 8;
