@@ -1161,8 +1161,13 @@ __global__ void gemm_64_16x16_3_tensor(int M, int N, int K, float *A, float *B, 
    reg_C[2] = 0.f;
    reg_C[3] = 0.f;
 
-   int im4 = threadIdx.x & 3;
-   int id4 = threadIdx.x >> 2;
+   //int im4 = threadIdx.x & 3;
+   //int id4 = threadIdx.x >> 2;
+
+   int im8 = threadIdx.x & 7;
+   int id8 = threadIdx.x >> 3;
+	
+   //int thread4 = threadIdx.x << 2;
    int thread4 = threadIdx.x << 2;
    
    // Compute block's starting coordinate
@@ -1171,24 +1176,28 @@ __global__ void gemm_64_16x16_3_tensor(int M, int N, int K, float *A, float *B, 
 
 
     //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
-    float2 *A_start = (float2*) (A + block_base_y + (im4 << 2) + (id4)*M);
+    //float2 *A_start = (float2*) (A + block_base_y + (im4 << 2) + (id4)*M);
+	float2 *A_start = (float2*) (A + block_base_y + (im8 << 1) + (id8)*M);
 	if (block_base_y == 3)
 	{
 		if (id4 == 0)
-			*((half2*)(sh_A + thread4)) = __float22half2_rn({(*(A_start)).x, 0.f});
-		*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn({0.f, 0.f});
+			*((half2*)(sh_A + thread2)) = __float22half2_rn({(*(A_start)).x, 0.f});
+		*((half2*)(sh_A + thread2 + 128)) = __float22half2_rn({0.f, 0.f});
 	}
 	else
 	{
-		*((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
-		*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));		
+		//*((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
+		//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
+		  
+    		*((half2*)(sh_A + thread2)) = __float22half2_rn(*(A_start));    
+    		*((half2*)(sh_A + thread2 + 128)) = __float22half2_rn(*(A_start + 4*M));   
 	}
 
     //load B from global memory to shared memory
-	float2 *B_start = (float2*) (B + K*block_base_x + (im4 << 2) + (id4)*K);
+	float2 *B_start = (float2*) (B + K*block_base_x + (im8 << 1) + (id8)*K);
     //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
-    *((half2*) (sh_B + thread4)) = __float22half2_rn(*(B_start));
-	*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
+    *((half2*) (sh_B + thread2)) = __float22half2_rn(*(B_start));
+	*((half2*) (sh_B + thread2 + 128)) = __float22half2_rn(*(B_start + 4));
 
    int double_buffer = 0;
    
@@ -1220,18 +1229,18 @@ __global__ void gemm_64_16x16_3_tensor(int M, int N, int K, float *A, float *B, 
 			if (block_base_y == 3)
 			{
 				if (id4 == 0)
-					*((half2*)(sh_A + double_buffer  + thread4)) = __float22half2_rn({(*(A_start)).x, 0.f});
-				*((half2*)(sh_A + double_buffer  + thread4 + 2)) = __float22half2_rn({0.f, 0.f});
+					*((half2*)(sh_A + double_buffer  + thread2)) = __float22half2_rn({(*(A_start)).x, 0.f});
+				*((half2*)(sh_A + double_buffer  + thread2 + 128)) = __float22half2_rn({0.f, 0.f});
 			}
 			else
 			{
-				*((half2*)(sh_A + double_buffer  + thread4)) = __float22half2_rn(*(A_start));
-				*((half2*)(sh_A + double_buffer  + thread4 + 2)) = __float22half2_rn(*(A_start + 1));		
+				*((half2*)(sh_A + double_buffer  + thread2)) = __float22half2_rn(*(A_start));
+				*((half2*)(sh_A + double_buffer  + thread2 + 128)) = __float22half2_rn(*(A_start + 4*M));		
 			}
 			
            B_start += 8;
-			*((half2*) (sh_B + double_buffer  + thread4)) = __float22half2_rn(*(B_start));
-			*((half2*) (sh_B + double_buffer  + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
+			*((half2*) (sh_B + double_buffer  + thread2)) = __float22half2_rn(*(B_start));
+			*((half2*) (sh_B + double_buffer  + thread2 + 128)) = __float22half2_rn(*(B_start + 4));
        }
    }
 
