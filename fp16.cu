@@ -966,14 +966,13 @@ __global__ void fp16gemm_16x16_tensor(float *A, float *B, float *C, int M, int N
 
     //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
     float2 *A_start = (float2*) (A + block_base_y + (im4 << 2) + (id4)*M);
-    *((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
-	*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
-
     //load B from global memory to shared memory
-	float2 *B_start = (float2*) (B + K*block_base_x + (im4 << 2) + (id4)*K);
-    //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
+    float2 *B_start = (float2*) (B + K*block_base_x + (im4 << 2) + (id4)*K);	
+    *((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
     *((half2*) (sh_B + thread4)) = __float22half2_rn(*(B_start));
-	*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
+    *((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
+    //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
+    *((half2*) (sh_B + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
 
     int double_buffer = 0;
    // if(threadIdx.x >=32) {	
@@ -1005,12 +1004,14 @@ __global__ void fp16gemm_16x16_tensor(float *A, float *B, float *C, int M, int N
         if (k + 16 < K)
 	{
             A_start += M << 3; // half2 --> 8M
+		B_start += 8;
             *((half2*) (sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
-			*((half2*) (sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start+1));
 			
-            B_start += 8;
+			
+            
             *((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
 			*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start+1));
+		*((half2*) (sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start+1));
         }
     }
 
