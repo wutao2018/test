@@ -22,10 +22,16 @@ void batchGoogleNetInception(cudnnHandle_t handle, const int N, const int C,
         const int K6, int *reC, float **x, float** filter, float* buf,
         const int *algo_best);
 		
-void batchGoogleNetInception(cudnnHandle_t handle, const int N, const int C,
+void batchGoogleNetInception2(cudnnHandle_t handle, const int N, const int C,
         const int H, const int W, const int xIdx, const int filterIdx,
         const int K1, const int K2, const int K3, const int K4, const int K5,
         const int K6, int *reC, float **x, float** filter, float* buf,
-        const int *algo_best);		
+        const int *algo_best);
+
+void batchGoogleNetInception3(cudnnHandle_t handle, const int N, const int C,
+        const int H, const int W, const int xIdx, const int filterIdx,
+        const int K1, const int K2, const int K3, const int K4, const int K5,
+        const int K6, int *reC, float **x, float** filter, float* buf,
+        const int *algo_best);			
 
 #endif /* BATCH_INCEPTION_H_ */
