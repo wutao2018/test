@@ -2946,7 +2946,7 @@ int main(int argc, char* argv[])
       float v2 = c_host_cublas[i];
       if (v1 / v2 > 1.0001 || v2 / v1 > 1.0001 || abs(v1 - v2) > 1e-5) {
          errors++;
-         if (errors < 10) printf("%f %f\n", v1, v2);
+         if (errors < 10) printf("%d %f %f\n", i, v1, v2);
       }
    }
    
