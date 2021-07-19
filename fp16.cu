@@ -61,9 +61,9 @@ void curandErrCheck_(curandStatus_t stat, const char *file, int line) {
 using namespace nvcuda;
 
 // Must be multiples of 16 for wmma code to work  16384
-#define MATRIX_M 1024
-#define MATRIX_N 1024
-#define MATRIX_K 1024
+#define MATRIX_M 48
+#define MATRIX_N 48
+#define MATRIX_K 48
 
 
 
@@ -1177,13 +1177,13 @@ __global__ void gemm_64_16x16_3_tensor(int M, int N, int K, float *A, float *B, 
 
     //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
     //float2 *A_start = (float2*) (A + block_base_y + (im4 << 2) + (id4)*M);
-	float2 *A_start = (float2*) (A + block_base_y + (im8 << 1) + (id8)*M);
+	float *A_start = (float*) (A + block_base_y + (im8 << 1) + (id8)*M);
 	if (blockIdx.x == 3)
 	{
 		if (im8 == 0)
 		{
-			*((half*)(sh_A + thread2)) = __float2half_rn(*(A_start).x);
-			*((half*)(sh_A + thread2 + 128)) = __float2half_rn(*(A_start+4*M).x);
+			*((half*)(sh_A + thread2)) = __float2half_rn(*(A_start));
+			*((half*)(sh_A + thread2 + 128)) = __float2half_rn(*(A_start+8*M));
 		}
 		*((half*)(sh_A + thread2 + 1)) = __float2half_rn(0.f);
 		*((half*)(sh_A + thread2 + 129)) = __float2half_rn(0.f);
@@ -1192,10 +1192,10 @@ __global__ void gemm_64_16x16_3_tensor(int M, int N, int K, float *A, float *B, 
 	{
 		//*((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
 		//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
-		*((half*)(sh_A + thread2)) = __float2half_rn(*(A_start).x);
-    		*((half*)(sh_A + thread2 + 1)) = __float2half_rn(*(A_start).y); 
-    		*((half*)(sh_A + thread2 + 128)) = __float2half_rn(*(A_start + 4*M).x);
-		*((half*)(sh_A + thread2 + 129)) = __float2half_rn(*(A_start + 4*M).y);  
+		*((half*)(sh_A + thread2)) = __float2half_rn(*(A_start));
+    		*((half*)(sh_A + thread2 + 1)) = __float2half_rn(*(A_start)); 
+    		*((half*)(sh_A + thread2 + 128)) = __float2half_rn(*(A_start + 8*M));
+		*((half*)(sh_A + thread2 + 129)) = __float2half_rn(*(A_start + 8*M+1));  
 	}
 
     //load B from global memory to shared memory
@@ -1233,23 +1233,23 @@ __global__ void gemm_64_16x16_3_tensor(int M, int N, int K, float *A, float *B, 
 
        if (k+16 < K)
 	   {
-           A_start += M<<3;
+           A_start += M<<4;
 			if (blockIdx.x == 3)
 			{
 				if (im8 == 0)
 				{
-					*((half*)(sh_A + thread2)) = __float2half_rn(*(A_start).x);
-					*((half*)(sh_A + thread2 + 128)) = __float2half_rn(*(A_start+4*M).x);
+					*((half*)(sh_A+ double_buffer + thread2)) = __float2half_rn(*(A_start));
+					*((half*)(sh_A+ double_buffer + thread2 + 128)) = __float2half_rn(*(A_start+8*M));
 				}
-				*((half*)(sh_A + thread2 + 1)) = __float2half_rn(0.f);
-				*((half*)(sh_A + thread2 + 129)) = __float2half_rn(0.f);
+				*((half*)(sh_A+ double_buffer + thread2 + 1)) = __float2half_rn(0.f);
+				*((half*)(sh_A+ double_buffer + thread2 + 129)) = __float2half_rn(0.f);
 			}
 			else
 			{
-				*((half*)(sh_A + thread2)) = __float2half_rn(*(A_start).x);
-				*((half*)(sh_A + thread2 + 1)) = __float2half_rn(*(A_start).y); 
-				*((half*)(sh_A + thread2 + 128)) = __float2half_rn(*(A_start + 4*M).x);
-				*((half*)(sh_A + thread2 + 129)) = __float2half_rn(*(A_start + 4*M).y);  		
+				*((half*)(sh_A+ double_buffer + thread2)) = __float2half_rn(*(A_start));
+				*((half*)(sh_A+ double_buffer + thread2 + 1)) = __float2half_rn(*(A_start)); 
+				*((half*)(sh_A+ double_buffer + thread2 + 128)) = __float2half_rn(*(A_start + 8*M));
+				*((half*)(sh_A+ double_buffer + thread2 + 129)) = __float2half_rn(*(A_start + 8*M+1));  		
 			}
 			
            B_start += 8;
