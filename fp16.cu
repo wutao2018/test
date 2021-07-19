@@ -2923,15 +2923,15 @@ int main(int argc, char* argv[])
    // Now using cuBLAS
    printf("Running with cuBLAS...\n");
    cudaErrCheck(cudaEventRecord(startcublas));
-   /*cublasErrCheck(cublasGemmEx(cublasHandle, CUBLAS_OP_N, CUBLAS_OP_N, 
+   cublasErrCheck(cublasGemmEx(cublasHandle, CUBLAS_OP_N, CUBLAS_OP_N, 
                 MATRIX_M, MATRIX_N, MATRIX_K, 
                 &alpha,
                 a_fp16, CUDA_R_16F, MATRIX_M,
                 b_fp16, CUDA_R_16F, MATRIX_K,
                 &beta, 
                 c_cublas, CUDA_R_32F, MATRIX_M,
-                CUDA_R_32F, CUBLAS_GEMM_DFALT_TENSOR_OP));*/
-   gemm_64_16x16_1<<<gridDim3, blockDim3>>>(MATRIX_M,MATRIX_N,MATRIX_K,a_fp32,b_fp32,c_cublas);
+                CUDA_R_32F, CUBLAS_GEMM_DFALT_TENSOR_OP));
+   //gemm_64_16x16_1<<<gridDim3, blockDim3>>>(MATRIX_M,MATRIX_N,MATRIX_K,a_fp32,b_fp32,c_cublas);
    cudaErrCheck(cudaEventRecord(stopcublas));
 
    // Error checking
