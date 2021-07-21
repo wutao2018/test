@@ -103,87 +103,6 @@ __device__ void gemm_64_16x16_1(int M, int N, int K, int P, int Q, float *A, flo
     C[C_offset+3] = reg_C.w;
 }
 
-// 8x8 gemm with 64 thread
-__device__ void gemm_64_8x8_1(int M, int N, int K, int P, int Q, float *A, float *B, float *C, float *sh){
-
-	/*float* sh_A = sh;
-    float* sh_B = sh + 2*8*8;
-
-    float reg_C = 0.f;
-
-    float reg_A[8];
-    float reg_B[2];
-
-    // Compute block's starting coordinate
-    int block_base_x = blockIdx.y*8;
-    int block_base_y = blockIdx.x*8;
-
-    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
-    float2 *A_start = (float2*) (A + block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M);
-    *((float2*) (sh_A + 2*threadIdx.x)) = *(A_start);
-
-    //load B from global memory to shared memory
-    float2 *B_start = (float2*) (B + K*block_base_x + (threadIdx.x/16)*2 + (threadIdx.x%16)*K);
-    *((float2*) (sh_B + 2*threadIdx.x)) = *(B_start);
-
-    int double_buffer = 0;
-#pragma unroll
-    for(int k = 0; k < K; k += 8)
-	{
-        __syncthreads();
-        int A_offset = double_buffer + (threadIdx.x%4)*4;
-        int B_offset = double_buffer + ((threadIdx.x/4)*2);	
-		
-#pragma unroll
-        for (int i=0; i<8; i+=2)   // 全部展开有register spill吗
-		{
-            reg_A[0] = sh_A[A_offset];    // A_offset+0 ~ A_offset+3 为什么不用向量呢
-            reg_A[1] = sh_A[A_offset+1];  // 为了避免bank冲突, 这8个寄存器都不是连续的【4个就不会重复】，因此不能使用向量传输指令
-            reg_A[2] = sh_A[A_offset+2];
-            reg_A[3] = sh_A[A_offset+3];
-			reg_A[4] = sh_A[A_offset+16];
-            reg_A[5] = sh_A[A_offset+17];
-            reg_A[6] = sh_A[A_offset+18];
-            reg_A[7] = sh_A[A_offset+19];
-			
-			reg_B[0] = sh_B[B_offset];
-			
-            reg_C.x = fma(reg_A[0], reg_B[0], reg_C.x); // reg_C.x = reg_A[0]*reg_B[0] + reg_A[4]*reg_B[1]
-            reg_C.y = fma(reg_A[1], reg_B[0], reg_C.y);
-            reg_C.z = fma(reg_A[2], reg_B[0], reg_C.z);
-            reg_C.w = fma(reg_A[3], reg_B[0], reg_C.w);
-			
-			reg_B[1] = sh_B[B_offset+1];
-			
-            reg_C.x = fma(reg_A[4], reg_B[1], reg_C.x);
-            reg_C.y = fma(reg_A[5], reg_B[1], reg_C.y);
-            reg_C.z = fma(reg_A[6], reg_B[1], reg_C.z);
-            reg_C.w = fma(reg_A[7], reg_B[1], reg_C.w);
-
-            A_offset += 32;
-            B_offset += 32;
-        }
-		
-        double_buffer ^= 128;
-		
-        if (k + 8 < K)
-		{
-            A_start += 4*M; // float2 --> 8M
-            *((float2*) (sh_A + double_buffer + 2*threadIdx.x)) = *(A_start);
-            B_start += 4;
-            *((float2*) (sh_B + double_buffer + 2*threadIdx.x)) = *(B_start);
-        }
-    }
-
-	int ind = blockIdx.x*16 + (threadIdx.x%4)*4;  // 横、纵坐标  M=HW， K = C， N = K
-	// blockIdx.x*16 < (M + (0)*16) ;  M%16 == 0 && P%2 == 0 ;   relu = max(0, x)
-    int C_offset = ind/(P*Q)*(P*Q*N) + ind%(P*Q) + (threadIdx.x/4)*(P*Q) + blockIdx.y*16*(P*Q);
-    C[C_offset] = reg_C.x > 0 ? reg_C.x : 0;
-    C[C_offset+1] = reg_C.y;
-    C[C_offset+2] = reg_C.z;
-    C[C_offset+3] = reg_C.w;*/
-}
-
 
 // 64 thread  --  new
 __device__ void fp16gemm_16x16_1(int M, int N, int K, int P, int Q, float *A, float *B, float *C, float* sh) {
@@ -230,7 +149,7 @@ __device__ void fp16gemm_16x16_1(int M, int N, int K, int P, int Q, float *A, fl
 	{
         __syncthreads();
         int A_offset = double_buffer + (im4 << 2);
-        int B_offset = double_buffer + (id4 << 1);
+        int B_offset = double_buffer + (id4 << 1);	
 		
 #pragma unroll
         for (int i=0; i<8; i+=2)   // 全部展开有register spill吗
@@ -295,28 +214,28 @@ __device__ void fp16gemm_16x16_tensor(int M, int N, int K, int P, int Q, float *
 	
 	int im4 = threadIdx.x & 3;
 	int id4 = threadIdx.x >> 2;
-	//int im8 = threadIdx.x & 7;
-	//int id8 = threadIdx.x >> 3;
+	int im8 = threadIdx.x & 7;
+	int id8 = threadIdx.x >> 3;
 	//int im16 = threadIdx.x & 15;
 	//int id16 = threadIdx.x >> 4;
 	
-	//int thread2 = threadIdx.x << 1;
-	int thread4 = threadIdx.x << 2;
+	int thread2 = threadIdx.x << 1;
+	//int thread4 = threadIdx.x << 2;
 
     // Compute block's starting coordinate
     int block_base_x = blockIdx.y << 4;
     int block_base_y = blockIdx.x << 4;
 
     //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
-    float2 *A_start = (float2*) (A + block_base_y + (im4 << 2) + (id4)*M);
-    *((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
-	*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
+    float2 *A_start = (float2*) (A + block_base_y + (im8 << 1) + (id8)*M);
+    *((half2*)(sh_A + thread2)) = __float22half2_rn(*(A_start));
+	*((half2*)(sh_A + thread2 + 128)) = __float22half2_rn(*(A_start + 4*M));
 
     //load B from global memory to shared memory
-	float2 *B_start = (float2*) (B + K*block_base_x + (im4 << 2) + (id4)*K);
+	float2 *B_start = (float2*) (B + K*block_base_x + (im8 << 1) + (id8)*K);
     //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
-    *((half2*) (sh_B + thread4)) = __float22half2_rn(*(B_start));
-	*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
+    *((half2*) (sh_B + thread2)) = __float22half2_rn(*(B_start));
+	*((half2*) (sh_B + thread2 + 128)) = __float22half2_rn(*(B_start + 4*K));
 
     int double_buffer = 0;
 	
@@ -332,30 +251,37 @@ __device__ void fp16gemm_16x16_tensor(int M, int N, int K, int P, int Q, float *
     for(int k = 0; k < K; k += 16)
 	{
         __syncthreads();
-		
+	
+	if (k+16 < K)
+	{
 		// Load the inputs
         wmma::load_matrix_sync(a_frag, sh_A + double_buffer, 16);
         wmma::load_matrix_sync(b_frag, sh_B + double_buffer, 16);
  
         // Perform the matrix multiplication
         wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);		
-
+	}
         double_buffer ^= 256;  // 16*16
 		
         if (k + 16 < K)
 		{
             A_start += M << 3; // half2 --> 8M
-            *((half2*) (sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
-			*((half2*) (sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start+1));
+            *((half2*) (sh_A + double_buffer + thread2)) = __float22half2_rn(*(A_start));
+			*((half2*) (sh_A + double_buffer + thread2 + 128)) = __float22half2_rn(*(A_start+4*M));
 			
             B_start += 8;
-            *((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
-			*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start+1));
+            *((half2*) (sh_B + double_buffer + thread2)) = __float22half2_rn(*(B_start));
+			*((half2*) (sh_B + double_buffer + thread2 + 128)) = __float22half2_rn(*(B_start+4*K));
         }
     }
 	
 	// Store the output
+    if (threadIdx.x < 32)
+    {
+    for (int i=0; i < acc_frag.num_elements; i++)
+    	    acc_frag.x[i] = acc_frag.x[i] > 0.f ? acc_frag.x[i]:0.f;
     wmma::store_matrix_sync(C + block_base_y + (block_base_x * M), acc_frag, M, wmma::mem_col_major);	
+	}
 }
 
 
@@ -854,12 +780,12 @@ __device__ void fp16gemm_16x16_3(int M, int N, int K, int P, int Q, float *A, fl
     int block_base_y = blockIdx.x << 4;
 
     //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
-    int aoffset = block_base_y + (im8 << 1) + (id8)*M;
+    int aoffset1 = block_base_y + (im8 << 1) + (id8)*M;
 	if(blockIdx.x == 3)
 	{
 		if (im8 == 0)
 		{
-			*(sh_A + thread2) = __float2half_rn(A[aoffset]);
+			*(sh_A + thread2) = __float2half_rn(A[aoffset1]);
 		}
 		else
 		{
@@ -870,8 +796,8 @@ __device__ void fp16gemm_16x16_3(int M, int N, int K, int P, int Q, float *A, fl
 	}
 	else
 	{
-		*(sh_A + thread2) = __float2half_rn( A[aoffset] );
-		*(sh_A + thread2 + 1) = __float2half_rn( A[aoffset+1] );
+		*(sh_A + thread2) = __float2half_rn( A[aoffset1] );
+		*(sh_A + thread2 + 1) = __float2half_rn( A[aoffset1+1] );
 	}
 
     //load B from global memory to shared memory
@@ -922,7 +848,7 @@ __device__ void fp16gemm_16x16_3(int M, int N, int K, int P, int Q, float *A, fl
 		
         if (k+8 < K)
 		{
-            aoffset += M << 3; // half2 --> 8M
+            aoffset1 += M << 3; // half2 --> 8M
             //*((half2*) (sh_A + double_buffer + thread2)) = __float22half2_rn(*(A_start));
 			//*(sh_A + double_buffer + thread2) = __float2half_rn( A[A_offset%(M*K)] );
 			//*(sh_A + double_buffer + thread2 + 1) = __float2half_rn( A[(A_offset+1)%(M*K)] );
@@ -930,7 +856,7 @@ __device__ void fp16gemm_16x16_3(int M, int N, int K, int P, int Q, float *A, fl
 			{
 				if (im8 == 0)
 				{
-					*(sh_A + double_buffer + thread2) = __float2half_rn(A[aoffset]);
+					*(sh_A + double_buffer + thread2) = __float2half_rn(A[aoffset1]);
 				}
 				else
 				{
@@ -941,8 +867,8 @@ __device__ void fp16gemm_16x16_3(int M, int N, int K, int P, int Q, float *A, fl
 			}
 			else
 			{
-				*(sh_A + double_buffer + thread2) = __float2half_rn( A[aoffset] );
-				*(sh_A + double_buffer + thread2 + 1) = __float2half_rn( A[aoffset+1] );
+				*(sh_A + double_buffer + thread2) = __float2half_rn( A[aoffset1] );
+				*(sh_A + double_buffer + thread2 + 1) = __float2half_rn( A[aoffset1+1] );
 			}
 			
             B_start += 4;
@@ -958,11 +884,11 @@ __device__ void fp16gemm_16x16_3(int M, int N, int K, int P, int Q, float *A, fl
     if (blockIdx.x < M/16)
     {
 		// Store the output
-		*(C + C_offset) = reg_C[0].x;  // C_offset计算
+		*(C + C_offset) = reg_C[0].x;
 		*(C + C_offset + 1) = reg_C[0].y;
 		//C[C_offset+1] = reg_C.y;
 		*(C + C_offset + 2) = reg_C[1].x;
-		*(C + C_offset + 3) = reg_C[1].y;
+		*(C + C_offset + 3) = reg_C[1].y;	
     }
     else
     {
@@ -978,6 +904,158 @@ __device__ void fp16gemm_16x16_3(int M, int N, int K, int P, int Q, float *A, fl
 
 
 __device__ void gemm_64_16x16_3_tensor(int M, int N, int K,  int P, int Q, float *A, float *B, float *C, float* sh){
+
+   //__shared__ half sh_A[512];
+   //__shared__ half sh_B[512];
+   //__shared__ float sh_C[256];
+   
+   half* sh_A = (half*)sh;
+   half* sh_B = (half*)(sh + 256);
+   __shared__ float sh_C[256];   
+
+   float reg_C[4];
+   reg_C[0] = 0.f;
+   reg_C[1] = 0.f;
+   reg_C[2] = 0.f;
+   reg_C[3] = 0.f;
+
+   int im8 = threadIdx.x & 7;
+   int id8 = threadIdx.x >> 3;
+   int thread2 = threadIdx.x << 1;
+   
+   // Compute block's starting coordinate
+   int block_base_x = blockIdx.y*16;
+   int block_base_y = blockIdx.x*16;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    float *A_start = (A + block_base_y + (im8 << 1) + (id8)*M);
+	if (blockIdx.x == 3)
+	{
+		if (im8 == 0)
+		{
+			*(sh_A + thread2) = __float2half_rn(*(A_start));
+			*(sh_A + thread2+128) = __float2half_rn(*(A_start+8*M));
+		}
+		
+		//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn({0.f, 0.f});
+		*(sh_A + thread2 + 1) = __float2half_rn(0.f);
+		*(sh_A + thread2 + 129) = __float2half_rn(0.f);
+		//*(sh_A + thread4 + 3) = __float2half_rn(0.f);
+	}
+	else
+	{
+		//*((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
+		//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
+		*(sh_A + thread2) = __float2half_rn(*(A_start));
+		*(sh_A + thread2 + 1) = __float2half_rn(*(A_start+1));
+		*(sh_A + thread2 + 128) = __float2half_rn(*(A_start+8*M));
+		*(sh_A + thread2 + 129) = __float2half_rn(*(A_start+8*M+1));
+	}
+
+    //load B from global memory to shared memory
+	float2 *B_start = (float2*) (B + K*block_base_x + (im8 << 1) + (id8)*K);
+    //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
+    *((half2*) (sh_B + thread2)) = __float22half2_rn(*(B_start));
+	*((half2*) (sh_B + thread2 + 128)) = __float22half2_rn(*(B_start + 4*K));
+
+   int double_buffer = 0;
+   
+   // Declare the fragments
+   wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> a_frag;
+   wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> b_frag;
+   wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
+   //wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
+
+   wmma::fill_fragment(acc_frag, 0.0f);
+   
+#pragma unroll
+   for(int k=0; k<K; k+=16)
+   {
+       __syncthreads();
+	   
+		// Load the inputs
+	if(threadIdx.x < 32){
+        wmma::load_matrix_sync(a_frag, sh_A + double_buffer, 16);
+        wmma::load_matrix_sync(b_frag, sh_B + double_buffer, 16);
+ 
+        // Perform the matrix multiplication
+        wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);		   
+	}
+       double_buffer ^= 256;
+
+       if (k+16 < K)
+	   {
+           A_start += M<<4;
+			if (blockIdx.x == 3)
+			{
+				if (im8 == 0)
+				{
+					*(sh_A + double_buffer + thread2) = __float2half_rn(*(A_start));
+					*(sh_A + double_buffer + thread2+128) = __float2half_rn(*(A_start+8*M));
+				}
+				
+				//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn({0.f, 0.f});
+				*(sh_A + double_buffer + thread2 + 1) = __float2half_rn(0.f);
+				*(sh_A + double_buffer + thread2 + 129) = __float2half_rn(0.f);
+				//*(sh_A + double_buffer + thread4 + 3) = __float2half_rn(0.f);
+			}
+			else
+			{
+				//*((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
+				//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
+				*(sh_A + double_buffer + thread2) = __float2half_rn(*(A_start));
+				*(sh_A + double_buffer + thread2 + 1) = __float2half_rn(*(A_start+1));
+				*(sh_A + double_buffer + thread2 + 128) = __float2half_rn(*(A_start+8*M));
+				*(sh_A + double_buffer + thread2 + 129) = __float2half_rn(*(A_start+8*M+1));
+			}
+			
+           B_start += 8;
+			*((half2*) (sh_B + double_buffer  + thread2)) = __float22half2_rn(*(B_start));
+			*((half2*) (sh_B + double_buffer  + thread2 + 128)) = __float22half2_rn(*(B_start + 4*K));
+       }
+   }
+
+	int ind = blockIdx.x*16 + (threadIdx.x%4)*4;
+	int PQ = M; 
+    int C_offset = ind/(PQ)*(PQ*N) + ind%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*16*(PQ);
+
+   if (blockIdx.x < M/16)
+   {
+		// Store the output
+	if(threadIdx.x < 32)
+	{
+		for (int i=0; i < acc_frag.num_elements; i++)
+			acc_frag.x[i] = acc_frag.x[i] > 0.f ? acc_frag.x[i]:0.f;
+		wmma::store_matrix_sync(C + block_base_y + (block_base_x * M), acc_frag, M, wmma::mem_col_major);
+	}
+   }
+   else
+   {
+		// Store the output
+	if(threadIdx.x < 32)
+		wmma::store_matrix_sync(sh_C, acc_frag, 16, wmma::mem_col_major);
+	
+	__syncthreads();
+
+	//if (threadIdx.x%4 == 0)
+	   
+	   //reg_C[1] = sh_C[threadIdx.x*4 + 1];
+	   //reg_C[2] = sh_C[threadIdx.x*4 + 2];
+	   //reg_C[3] = sh_C[threadIdx.x*4 + 3];
+	
+      // int ruler = (threadIdx.x%4)*4;
+      // int rag = M%16;
+	   
+       if (threadIdx.x%4 == 0)
+	   {
+	       reg_C[0] = sh_C[threadIdx.x*4];
+           C[C_offset] = reg_C[0] > 0.f ? reg_C[0]:0.f;
+	 }
+   }
+}
+
+
+__device__ void gemm_64_16x16_3_tensor0(int M, int N, int K,  int P, int Q, float *A, float *B, float *C, float* sh){
 
    //__shared__ half sh_A[512];
    //__shared__ half sh_B[512];
@@ -1106,9 +1184,9 @@ __device__ void gemm_64_16x16_3_tensor(int M, int N, int K,  int P, int Q, float
    else
    {
 		// Store the output
-		wmma::store_matrix_sync(sh_C, acc_frag, 16, wmma::mem_col_major);
+	wmma::store_matrix_sync(sh_C, acc_frag, 16, wmma::mem_col_major);
 		
-	   reg_C[0] = sh_C[threadIdx.x*4];
+	reg_C[0] = sh_C[threadIdx.x*4];
 	   //reg_C[1] = sh_C[threadIdx.x*4 + 1];
 	   //reg_C[2] = sh_C[threadIdx.x*4 + 2];
 	   //reg_C[3] = sh_C[threadIdx.x*4 + 3];
@@ -1117,11 +1195,86 @@ __device__ void gemm_64_16x16_3_tensor(int M, int N, int K,  int P, int Q, float
        int rag = M%16;
 	   
        if (ruler < rag)
-	   {
+       {
            C[C_offset] = reg_C[0];
-	   }
+       }
    }
 }
+
+__device__ void fp16gemm_16x16_tensor0(int M, int N, int K, int P, int Q, float *A, float *B, float *C, float* sh) {
+
+	//__shared__ half sh_A[512];
+	//__shared__ half sh_B[512];  // 2*16*16
+	
+	half* sh_A = (half*)sh;
+    half* sh_B = (half*)(sh + 256);	
+	
+	int im4 = threadIdx.x & 3;
+	int id4 = threadIdx.x >> 2;
+	//int im8 = threadIdx.x & 7;
+	//int id8 = threadIdx.x >> 3;
+	//int im16 = threadIdx.x & 15;
+	//int id16 = threadIdx.x >> 4;
+	
+	//int thread2 = threadIdx.x << 1;
+	int thread4 = threadIdx.x << 2;
+
+    // Compute block's starting coordinate
+    int block_base_x = blockIdx.y << 4;
+    int block_base_y = blockIdx.x << 4;
+
+    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
+    float2 *A_start = (float2*) (A + block_base_y + (im4 << 2) + (id4)*M);
+    *((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
+	*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
+
+    //load B from global memory to shared memory
+	float2 *B_start = (float2*) (B + K*block_base_x + (im4 << 2) + (id4)*K);
+    //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
+    *((half2*) (sh_B + thread4)) = __float22half2_rn(*(B_start));
+	*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
+
+    int double_buffer = 0;
+	
+   // Declare the fragments
+   wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> a_frag;
+   wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> b_frag;
+   wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
+   //wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
+
+   wmma::fill_fragment(acc_frag, 0.0f);
+   
+#pragma unroll
+    for(int k = 0; k < K; k += 16)
+	{
+        __syncthreads();
+		
+		// Load the inputs
+        wmma::load_matrix_sync(a_frag, sh_A + double_buffer, 16);
+        wmma::load_matrix_sync(b_frag, sh_B + double_buffer, 16);
+ 
+        // Perform the matrix multiplication
+        wmma::mma_sync(acc_frag, a_frag, b_frag, acc_frag);		
+
+        double_buffer ^= 256;  // 16*16
+		
+        if (k + 16 < K)
+		{
+            A_start += M << 3; // half2 --> 8M
+            *((half2*) (sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
+			*((half2*) (sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start+1));
+			
+            B_start += 8;
+            *((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
+			*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start+1));
+        }
+    }
+	
+	// Store the output
+    wmma::store_matrix_sync(C + block_base_y + (block_base_x * M), acc_frag, M, wmma::mem_col_major);	
+}
+
+
 
 
 __global__ void gemm_2(int M1, int M2, int N1, int N2, int K1, int K2, int P, int Q, float *A1, float *A2, float *B1, float *B2, float *C1, float *C2){
@@ -1222,1071 +1375,6 @@ __global__ void gemm_4(int M, int N1, int N2, int N3, int N4,
 }
 
 
-__device__ void gemm_64_16x8_1(int M, int N, int K, float *A, float *B, float *C, float* sh){
-
-	//__shared__ float sh_A[256];
-    //__shared__ float sh_B[128];
-    float* sh_A = sh;
-    float* sh_B = (sh + 256);
-   
-    float2 reg_C;
-	reg_C.x =0.f;
-	reg_C.y =0.f;
-
-    float reg_A[4];
-    //float4 reg_A[2];
-    float reg_B[2];
-
-    // Compute block's starting coordinate
-    int block_base_x = blockIdx.y*8;
-    int block_base_y = blockIdx.x*16;
-
-    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
-    float2 *A_start = (float2*) (A + block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M);
-    *((float2*) (sh_A + 2*threadIdx.x)) = *(A_start);
-
-    //load B from global memory to shared memory
-    float *B_start = (B + K*block_base_x + (threadIdx.x/8) + (threadIdx.x%8)*K);
-    *(sh_B + threadIdx.x) = *(B_start);
-
-    int double_buffer_A = 0;
-	int double_buffer_B = 0;
-
-    for(int k = 0; k < K; k += 8)
-	{
-        __syncthreads();
-        int A_offset = double_buffer_A + (threadIdx.x%8)*2;
-        int B_offset = double_buffer_B + (threadIdx.x/8);
-		
-#pragma unroll
-        for (int i=0; i<8; i+=1)
-		{
-            reg_A[0] = sh_A[A_offset];  
-            reg_A[1] = sh_A[A_offset+1]; 
-			reg_B[0] = sh_B[B_offset];
-
-            reg_C.x = fma(reg_A[0], reg_B[0], reg_C.x); // reg_C.x = reg_A[0]*reg_B[0] + reg_A[4]*reg_B[1]
-            reg_C.y = fma(reg_A[1], reg_B[0], reg_C.y);
-			
-			//reg_A[2] = sh_A[A_offset+16];
-            //reg_A[3] = sh_A[A_offset+17];
-			//reg_B[1] = sh_B[B_offset+1];
-			
-            //reg_C.x = fma(reg_A[2], reg_B[1], reg_C.x);
-            //reg_C.y = fma(reg_A[3], reg_B[1], reg_C.y);
-
-            A_offset += 16;
-            B_offset += 8;
-        }
-		
-        double_buffer_A ^= 128;
-		double_buffer_B ^= 64;
-		
-        if (k + 8 < K)
-		{
-            A_start += 4*M; // float2 --> 8M
-            *((float2*) (sh_A + double_buffer_A + 2*threadIdx.x)) = *(A_start);
-            B_start += 8;
-            *(sh_B + double_buffer_B + threadIdx.x) = *(B_start);
-        }
-    }
-	
-	int ind = blockIdx.x*16 + (threadIdx.x%8)*2;  // 行位置
-	// blockIdx.x*16 < (M + (0)*16) ;  M%16 == 0 && P%2 == 0 ;   relu = max(0, x)
-    int	PQ = M;
-    int C_offset = ind/PQ*(PQ*N) + ind%(PQ) + (threadIdx.x/8)*(PQ) + blockIdx.y*8*(PQ);
-    C[C_offset] = reg_C.x;
-    C[C_offset+1] = reg_C.y;
-}
-
-
-__device__ void gemm_64_16x8_3(int M, int N, int K, float *A, float *B, float *C, float* sh){
-
-	//__shared__ float sh_A[256];
-    //__shared__ float sh_B[128];
-   float* sh_A = sh;
-   float* sh_B = (sh + 256);	
-
-    float2 reg_C;
-	reg_C.x =0.f;
-	reg_C.y =0.f;
-
-    float reg_A[4];
-    //float4 reg_A[2];
-    float reg_B[2];
-
-    // Compute block's starting coordinate
-    int block_base_x = blockIdx.y*8;
-    int block_base_y = blockIdx.x*16;
-
-    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
-    int aoffset = block_base_y + (threadIdx.x%8)*2 + (threadIdx.x/8)*M;
-    *(sh_A + 2*threadIdx.x) = A[aoffset%(M*K)];
-	*(sh_A + 2*threadIdx.x + 1) = A[(aoffset+1)%(M*K)];
-
-    //load B from global memory to shared memory
-    float *B_start = (B + K*block_base_x + (threadIdx.x/8) + (threadIdx.x%8)*K);
-    *(sh_B + threadIdx.x) = *(B_start);
-
-    int double_buffer_A = 0;
-	int double_buffer_B = 0;
-
-    for(int k = 0; k < K; k += 8)
-	{
-        __syncthreads();
-        int A_offset = double_buffer_A + (threadIdx.x%8)*2;
-        int B_offset = double_buffer_B + (threadIdx.x/8);
-		
-#pragma unroll
-        for (int i=0; i<8; i+=1)
-		{
-            reg_A[0] = sh_A[A_offset];  
-            reg_A[1] = sh_A[A_offset+1]; 
-			reg_B[0] = sh_B[B_offset];
-
-            reg_C.x = fma(reg_A[0], reg_B[0], reg_C.x); // reg_C.x = reg_A[0]*reg_B[0] + reg_A[4]*reg_B[1]
-            reg_C.y = fma(reg_A[1], reg_B[0], reg_C.y);
-			
-			//reg_A[2] = sh_A[A_offset+16];
-            //reg_A[3] = sh_A[A_offset+17];
-			//reg_B[1] = sh_B[B_offset+1];
-			
-            //reg_C.x = fma(reg_A[2], reg_B[1], reg_C.x);
-            //reg_C.y = fma(reg_A[3], reg_B[1], reg_C.y);
-
-            A_offset += 16;
-            B_offset += 8;
-        }
-		
-        double_buffer_A ^= 128;
-		double_buffer_B ^= 64;
-		
-        if (k + 8 < K)
-		{
-            // A_start += 4*M; // float2 --> 8M
-			aoffset += 8*M;
-            //*((float2*) (sh_A + double_buffer_A + 2*threadIdx.x)) = *(A_start);
-			*(sh_A + double_buffer_A + 2*threadIdx.x) = A[aoffset%(M*K)];
-			*(sh_A + double_buffer_A + 2*threadIdx.x + 1) = A[(aoffset+1)%(M*K)];
-            B_start += 8;
-            *(sh_B + double_buffer_B + threadIdx.x) = *(B_start);
-        }
-    }
-	
-	int ind = blockIdx.x*16 + (threadIdx.x%8)*2;  // 行位置
-	// blockIdx.x*16 < (M + (0)*16) ;  M%16 == 0 && P%2 == 0 ;   relu = max(0, x)
-    int	PQ = M;
-    int C_offset = ind/PQ*(PQ*N) + ind%(PQ) + (threadIdx.x/8)*(PQ) + blockIdx.y*8*(PQ);
-    //C[C_offset] = reg_C.x;
-    //C[C_offset+1] = reg_C.y;
-	
-    if (blockIdx.x < M/16)
-    {
-		C[C_offset] = reg_C.x;
-		C[C_offset+1] = reg_C.y;
-    }
-    else
-    {
-       int ruler = (threadIdx.x%4)*4;
-       int rag = M%16;
-	   
-       if (ruler == 0)
-	   {
-           C[C_offset] = reg_C.x;
-	   }
-    }
-}
-
-
-// 16*8 subtile_K = 8
-__device__ void gemm_32_16x8_1(int M, int N, int K, int P, int Q, float *A, float *B, float *C, float *sh){
-
-	//__shared__ float sh_A[256];
-    //__shared__ float sh_B[128];
-   float* sh_A = sh;
-   float* sh_B = (sh + 256);	
-   
-    float4 reg_C;
-	reg_C.x =0.f;
-	reg_C.y =0.f;
-	reg_C.z =0.f;
-	reg_C.w =0.f;
-
-    float reg_A[8];
-    //float4 reg_A[2];
-    float reg_B[2];
-
-    // Compute block's starting coordinate
-    int block_base_x = blockIdx.y*8;
-    int block_base_y = blockIdx.x*16;
-
-    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
-    float4 *A_start = (float4*) (A + block_base_y + (threadIdx.x%4)*4 + (threadIdx.x/4)*M);
-    *((float4*) (sh_A + 4*threadIdx.x)) = *(A_start);
-
-    //load B from global memory to shared memory
-    float2 *B_start = (float2*) (B + K*block_base_x + (threadIdx.x/8)*2 + (threadIdx.x%8)*K);
-    *((float2*) (sh_B + 2*threadIdx.x)) = *(B_start);
-
-    int double_buffer_A = 0;
-	int double_buffer_B = 0;
-#pragma unroll
-    for(int k = 0; k < K; k += 8)
-	{
-        __syncthreads();
-        int A_offset = double_buffer_A + (threadIdx.x%4)*4;
-        int B_offset = double_buffer_B + ((threadIdx.x/4)*2);	
-		
-#pragma unroll
-        for (int i=0; i<8; i+=2)   // 全部展开有register spill吗
-		{
-            reg_A[0] = sh_A[A_offset];    // A_offset+0 ~ A_offset+3 为什么不用向量呢
-            reg_A[1] = sh_A[A_offset+1];  // 为了避免bank冲突, 这8个寄存器都不是连续的【4个就不会重复】，因此不能使用向量传输指令
-            reg_A[2] = sh_A[A_offset+2];
-            reg_A[3] = sh_A[A_offset+3];
-	   // *(float4*)reg_A = *(float4*)(sh_A+A_offset);
-	    reg_A[4] = sh_A[A_offset+16];
-            reg_A[5] = sh_A[A_offset+17];
-            reg_A[6] = sh_A[A_offset+18];
-            reg_A[7] = sh_A[A_offset+19];
-	   //*(float4*)(reg_A+4) = *(float4*)(sh_A+A_offset+16);
-	    reg_B[0] = sh_B[B_offset];
-			
-            reg_C.x = fma(reg_A[0], reg_B[0], reg_C.x); // reg_C.x = reg_A[0]*reg_B[0] + reg_A[4]*reg_B[1]
-            reg_C.y = fma(reg_A[1], reg_B[0], reg_C.y);
-            reg_C.z = fma(reg_A[2], reg_B[0], reg_C.z);
-            reg_C.w = fma(reg_A[3], reg_B[0], reg_C.w);
-			
-		//	reg_B[0] = sh_B[B_offset];
-			reg_B[1] = sh_B[B_offset+1];
-			
-            reg_C.x = fma(reg_A[4], reg_B[1], reg_C.x);
-            reg_C.y = fma(reg_A[5], reg_B[1], reg_C.y);
-            reg_C.z = fma(reg_A[6], reg_B[1], reg_C.z);
-            reg_C.w = fma(reg_A[7], reg_B[1], reg_C.w);
-
-            A_offset += 32;
-            B_offset += 16;
-        }
-		
-        double_buffer_A ^= 128;
-		double_buffer_B ^= 64;
-		
-        if (k + 8 < K)
-		{
-            A_start += 2*M; // float2 --> 8M
-            *((float4*) (sh_A + double_buffer_A + 4*threadIdx.x)) = *(A_start);
-			
-            B_start += 4;
-            *((float2*) (sh_B + double_buffer_B + 2*threadIdx.x)) = *(B_start);
-        }
-    }
-
-	int ind = blockIdx.x*16 + (threadIdx.x%4)*4;  // 横、纵坐标  M=HW， K = C， N = K
-	// blockIdx.x*16 < (M + (0)*16) ;  M%16 == 0 && P%2 == 0 ;   relu = max(0, x)
-    int	PQ = M;
-    int C_offset = ind/PQ*(PQ*N) + ind%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*8*(PQ);
-    C[C_offset] = reg_C.x;
-    C[C_offset+1] = reg_C.y;
-    C[C_offset+2] = reg_C.z;
-    C[C_offset+3] = reg_C.w;
-}
-
-
-
-// 128 threads 32*32
-__device__ void fp16gemm_32x32_tensor4(int M, int N, int K, int P, int Q, float *A, float *B, float *C, float *sh) {
-
-	//__shared__ half sh_A[2048];
-	//__shared__ half sh_B[2048];  // 2*32*32
-	
-    half* sh_A = sh;
-    half* sh_B = (sh + 2048);
-	
-	// __shared__ float sh_c[1024];  // 32*32
-	
-	int im4 = threadIdx.x & 3;
-	int id4 = threadIdx.x >> 2;
-	
-	//int thread2 = threadIdx.x << 1;
-	int thread4 = threadIdx.x << 2;
-
-    // Compute block's starting coordinate
-    int block_base_x = blockIdx.y << 5;
-    int block_base_y = blockIdx.x << 5;
-
-    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
-    float2 *A_start = (float2*) (A + block_base_y + (im4 << 2) + (id4)*M);
-    *((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
-	*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
-    *((half2*)(sh_A + thread4 + 16*32)) = __float22half2_rn(*(A_start + 8));
-	*((half2*)(sh_A + thread4 + 16*32 + 2)) = __float22half2_rn(*(A_start + 9));	
-
-    //load B from global memory to shared memory
-	float2 *B_start = (float2*) (B + K*block_base_x + (im4 << 2) + (id4)*K);
-    //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
-    *((half2*) (sh_B + thread4)) = __float22half2_rn(*(B_start));
-	*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
-    *((half2*) (sh_B + thread4 + 32*16)) = __float22half2_rn(*(B_start + 8));
-	*((half2*) (sh_B + thread4 + 32*16 + 2)) = __float22half2_rn(*(B_start + 9));
-	
-    int double_buffer = 0;
-	int offset_a = 0;
-	int offset_b = 0;
-	
-    // Declare the fragments
-	wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> a_frag[2];
-	wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> b_frag[2];
-    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
-    //wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
-
-    wmma::fill_fragment(acc_frag, 0.0f);
-   
-#pragma unroll
-    for(int k = 0; k < K; k += 32)
-	{
-        __syncthreads();
-		
-		offset_a = (threadIdx.x/64)<<9;  // 0, 0, 512,512;  
-		offset_b =  ((threadIdx.x>>5) & 1)<<8; //0, 256, 0, 256;
-		
-		// Load the inputs
-		wmma::load_matrix_sync(a_frag[0], sh_A + double_buffer + offset_a, 16);
-		wmma::load_matrix_sync(b_frag[0], sh_B + double_buffer + offset_b, 16);
- 
-		// Perform the matrix multiplication
-		wmma::mma_sync(acc_frag, a_frag[0], b_frag[0], acc_frag);
-		
-		offset_a += 256 ;  //  256, 256, 768, 768;
-		offset_b += 512 ;  //  512, 768, 512, 768;
-
-		// Load the inputs
-		wmma::load_matrix_sync(a_frag[1], sh_A + double_buffer + offset_a, 16);
-		wmma::load_matrix_sync(b_frag[1], sh_B + double_buffer + offset_b, 16);
- 
-		// Perform the matrix multiplication
-		wmma::mma_sync(acc_frag, a_frag[1], b_frag[1], acc_frag);		
-
-        double_buffer ^= 1024;  // 32*32
-		
-        if (k + 32 < K)
-		{
-            A_start += M << 4; // half2 --> 8M
-            //*((half2*) (sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
-			//*((half2*) (sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start+1));
-			*((half2*)(sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
-			*((half2*)(sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
-			*((half2*)(sh_A + double_buffer + thread4 + 16*32)) = __float22half2_rn(*(A_start + 8));
-			*((half2*)(sh_A + double_buffer + thread4 + 16*32 + 2)) = __float22half2_rn(*(A_start + 9));
-	
-            B_start += 16;
-            //*((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
-			//*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start+1));
-			*((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
-			*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
-			*((half2*) (sh_B + double_buffer + thread4 + 32*16)) = __float22half2_rn(*(B_start + 8));
-			*((half2*) (sh_B + double_buffer + thread4 + 32*16 + 2)) = __float22half2_rn(*(B_start + 9));			
-        }
-    }
-	
-	// Store the output
-	int x = (((threadIdx.x>>5)&1)<<4) ;
-	wmma::store_matrix_sync(C + block_base_y + (block_base_x + x) * M + ((threadIdx.x>>6)<<4), acc_frag, M, wmma::mem_col_major);
-}
-
-
-// 128 threads，N不能被32整除，可以被8整除
-__device__ void fp16gemm_32x32_tensor4_N8(int M, int N, int K, int P, int Q, float *A, float *B, float *C, , float *sh) {
-
-	//__shared__ half sh_A[2048];
-	//__shared__ half sh_B[2048];  // 2*32*32
-	
-    half* sh_A = sh;
-    half* sh_B = (sh + 2048);	
-	
-	__shared__ float sh_c[256];  // 16*16
-	
-	float4 reg_C[2];
-	
-	int im4 = threadIdx.x & 3;
-	int id4 = threadIdx.x >> 2;
-	
-	//int thread2 = threadIdx.x << 1;
-	int thread4 = threadIdx.x << 2;
-
-    // Compute block's starting coordinate
-    int block_base_x = blockIdx.y << 5;
-    int block_base_y = blockIdx.x << 5;
-
-    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
-    float2 *A_start = (float2*) (A + block_base_y + (im4 << 2) + (id4)*M);
-    *((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
-	*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
-    *((half2*)(sh_A + thread4 + 16*32)) = __float22half2_rn(*(A_start + 8));
-	*((half2*)(sh_A + thread4 + 16*32 + 2)) = __float22half2_rn(*(A_start + 9));	
-
-    //load B from global memory to shared memory
-	float2 *B_start = (float2*) (B + K*block_base_x + (im4 << 2) + (id4)*K);
-    //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
-	if ((blockIdx.y == N/32) && ((threadIdx.x/32) > ((N%32)>>3) - 1))
-	{
-		*((half2*) (sh_B + thread4)) = __float22half2_rn({0.f,0.f});
-		*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn({0.f,0.f});
-		*((half2*) (sh_B + thread4 + 32*16)) = __float22half2_rn({0.f,0.f});
-		*((half2*) (sh_B + thread4 + 32*16 + 2)) = __float22half2_rn({0.f,0.f});
-	}
-	else
-	{
-		*((half2*) (sh_B + thread4)) = __float22half2_rn(*(B_start));
-		*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
-		*((half2*) (sh_B + thread4 + 32*16)) = __float22half2_rn(*(B_start + 8));
-		*((half2*) (sh_B + thread4 + 32*16 + 2)) = __float22half2_rn(*(B_start + 9));
-	}
-	
-    int double_buffer = 0;
-	int offset_a = 0;
-	int offset_b = 0;
-	
-    // Declare the fragments
-	wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> a_frag[2];
-	wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> b_frag[2];
-    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
-    //wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
-
-    wmma::fill_fragment(acc_frag, 0.0f);
-   
-#pragma unroll
-    for(int k = 0; k < K; k += 32)
-	{
-        __syncthreads();
-		
-		offset_a = (threadIdx.x/64)<<9;  // 0, 0, 512,512;  
-		offset_b =  ((threadIdx.x>>5) & 1)<<8; //0, 256, 0, 256;
-		
-		// Load the inputs
-		wmma::load_matrix_sync(a_frag[0], sh_A + double_buffer + offset_a, 16);
-		wmma::load_matrix_sync(b_frag[0], sh_B + double_buffer + offset_b, 16);
- 
-		// Perform the matrix multiplication
-		wmma::mma_sync(acc_frag, a_frag[0], b_frag[0], acc_frag);
-		
-		offset_a += 256 ;  //  256, 256, 768, 768;
-		offset_b += 512 ;  //  512, 768, 512, 768;
-
-		// Load the inputs
-		wmma::load_matrix_sync(a_frag[1], sh_A + double_buffer + offset_a, 16);
-		wmma::load_matrix_sync(b_frag[1], sh_B + double_buffer + offset_b, 16);
- 
-		// Perform the matrix multiplication
-		wmma::mma_sync(acc_frag, a_frag[1], b_frag[1], acc_frag);		
-
-        double_buffer ^= 1024;  // 32*32
-		
-        if (k + 32 < K)
-		{
-            A_start += M << 4; // half2 --> 8M
-            //*((half2*) (sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
-			//*((half2*) (sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start+1));
-			*((half2*)(sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
-			*((half2*)(sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
-			*((half2*)(sh_A + double_buffer + thread4 + 16*32)) = __float22half2_rn(*(A_start + 8));
-			*((half2*)(sh_A + double_buffer + thread4 + 16*32 + 2)) = __float22half2_rn(*(A_start + 9));
-	
-            B_start += 16;
-            //*((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
-			//*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start+1));
-			//*((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
-			//*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
-			//*((half2*) (sh_B + double_buffer + thread4 + 32*16)) = __float22half2_rn(*(B_start + 8));
-			//*((half2*) (sh_B + double_buffer + thread4 + 32*16 + 2)) = __float22half2_rn(*(B_start + 9));
-			if ((blockIdx.y == N/32) && ((threadIdx.x/32) > ((N%32)>>3) - 1))
-			{
-				*((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn({0.f,0.f});
-				*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn({0.f,0.f});
-				*((half2*) (sh_B + double_buffer + thread4 + 32*16)) = __float22half2_rn({0.f,0.f});
-				*((half2*) (sh_B + double_buffer + thread4 + 32*16 + 2)) = __float22half2_rn({0.f,0.f});
-			}
-			else
-			{
-				*((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
-				*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
-				*((half2*) (sh_B + double_buffer + thread4 + 32*16)) = __float22half2_rn(*(B_start + 8));
-				*((half2*) (sh_B + double_buffer + thread4 + 32*16 + 2)) = __float22half2_rn(*(B_start + 9));
-			}			
-        }
-    }
-	
-	// Store the output
-	int x = (((threadIdx.x>>5)&1)<<4);
-	
-	//wmma::store_matrix_sync(C + block_base_y + (block_base_x + x) * M + ((threadIdx.x>>6)<<4), acc_frag, M, wmma::mem_col_major);
-
-    if (blockIdx.y < N/32)
-    {
-		// Store the output
-		wmma::store_matrix_sync(C + block_base_y + (block_base_x + x) * M + ((threadIdx.x>>6)<<4), acc_frag, M, wmma::mem_col_major);	
-    }
-    else
-    {
-		// Store the output
-	   //int C_offset = C + block_base_y + (block_base_x + x) * M + ((threadIdx.x>>6)<<4) + ((threadIdx.x%32)/2)*M + ((threadIdx.x %32)/2)*8;
-	   int C_offset = block_base_y + (block_base_x + x) * M + ((threadIdx.x>>6)<<4) + ((threadIdx.x & 31)>>1)*M + ((threadIdx.x & 31)>>1)<<3;
-	   
-	   wmma::store_matrix_sync(sh_c, acc_frag, 16, wmma::mem_col_major);
-	   
-	   if (C_offset/M < N)
-	   {
-		   reg_C[0].x = sh_c[(threadIdx.x<<3)];
-		   reg_C[0].y = sh_c[(threadIdx.x<<3) + 1];
-		   reg_C[0].z = sh_c[(threadIdx.x<<3) + 2];
-		   reg_C[0].w = sh_c[(threadIdx.x<<3) + 3];
-		   *((float4*)(C+C_offset)) = reg_C[0];
-		   
-		   reg_C[1].x = sh_c[(threadIdx.x<<3) + 4];
-		   reg_C[1].y = sh_c[(threadIdx.x<<3) + 5];
-		   reg_C[1].z = sh_c[(threadIdx.x<<3) + 6];
-		   reg_C[1].w = sh_c[(threadIdx.x<<3) + 7];
-		   *((float4*)(C+C_offset+4)) = reg_C[1];
-	   }
-    }
-}
-
-// 128 threads，N不能被32整除，可以被8整除, K不能被32整数
-__device__ void fp16gemm_32x32_tensor4_N8_K16(int M, int N, int K, int P, int Q, float *A, float *B, float *C, , float *sh) {
-
-	//__shared__ half sh_A[2048];
-	//__shared__ half sh_B[2048];  // 2*32*32
-	
-    half* sh_A = sh;
-    half* sh_B = (sh + 2048);
-	
-	__shared__ float sh_c[256];  // 16*16
-	
-	float4 reg_C[2];
-	
-	int im4 = threadIdx.x & 3;
-	int id4 = threadIdx.x >> 2;
-	
-	//int thread2 = threadIdx.x << 1;
-	int thread4 = threadIdx.x << 2;
-
-    // Compute block's starting coordinate
-    int block_base_x = blockIdx.y << 5;
-    int block_base_y = blockIdx.x << 5;
-
-    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
-    float2 *A_start = (float2*) (A + block_base_y + (im4 << 2) + (id4)*M);
-    *((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
-	*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
-    *((half2*)(sh_A + thread4 + 16*32)) = __float22half2_rn(*(A_start + 8));
-	*((half2*)(sh_A + thread4 + 16*32 + 2)) = __float22half2_rn(*(A_start + 9));	
-
-    //load B from global memory to shared memory
-	float2 *B_start = (float2*) (B + K*block_base_x + (im4 << 2) + (id4)*K);
-    //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
-	if ((blockIdx.y == N/32) && ((threadIdx.x/32) > ((N%32)>>3) - 1))
-	{
-		*((half2*) (sh_B + thread4)) = __float22half2_rn({0.f,0.f});
-		*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn({0.f,0.f});
-		*((half2*) (sh_B + thread4 + 32*16)) = __float22half2_rn({0.f,0.f});
-		*((half2*) (sh_B + thread4 + 32*16 + 2)) = __float22half2_rn({0.f,0.f});
-	}
-	else
-	{
-		*((half2*) (sh_B + thread4)) = __float22half2_rn(*(B_start));
-		*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
-		*((half2*) (sh_B + thread4 + 32*16)) = __float22half2_rn(*(B_start + 8));
-		*((half2*) (sh_B + thread4 + 32*16 + 2)) = __float22half2_rn(*(B_start + 9));
-	}
-	
-    int double_buffer = 0;
-	int offset_a = 0;
-	int offset_b = 0;
-	
-    // Declare the fragments
-	wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> a_frag[2];
-	wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> b_frag[2];
-    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
-    //wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
-
-    wmma::fill_fragment(acc_frag, 0.0f);
-   
-    int kk = 0;
-#pragma unroll
-    for(int k = 0; k < K; k += 32)
-	{
-        __syncthreads();
-		
-		offset_a = (threadIdx.x/64)<<9;  // 0, 0, 512,512;  
-		offset_b =  ((threadIdx.x>>5) & 1)<<8; //0, 256, 0, 256;
-		
-		// Load the inputs
-		wmma::load_matrix_sync(a_frag[0], sh_A + double_buffer + offset_a, 16);
-		wmma::load_matrix_sync(b_frag[0], sh_B + double_buffer + offset_b, 16);
- 
-		// Perform the matrix multiplication
-		wmma::mma_sync(acc_frag, a_frag[0], b_frag[0], acc_frag);
-		
-		offset_a += 256 ;  //  256, 256, 768, 768;
-		offset_b += 512 ;  //  512, 768, 512, 768;
-
-		// Load the inputs
-		wmma::load_matrix_sync(a_frag[1], sh_A + double_buffer + offset_a, 16);
-		wmma::load_matrix_sync(b_frag[1], sh_B + double_buffer + offset_b, 16);
- 
-		// Perform the matrix multiplication
-		wmma::mma_sync(acc_frag, a_frag[1], b_frag[1], acc_frag);		
-
-        double_buffer ^= 1024;  // 32*32
-		
-        if (k + 32 < K)
-		{
-            A_start += M << 4; // half2 --> 8M
-            //*((half2*) (sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
-			//*((half2*) (sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start+1));
-			*((half2*)(sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
-			*((half2*)(sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
-			*((half2*)(sh_A + double_buffer + thread4 + 16*32)) = __float22half2_rn(*(A_start + 8));
-			*((half2*)(sh_A + double_buffer + thread4 + 16*32 + 2)) = __float22half2_rn(*(A_start + 9));
-	
-            B_start += 16;
-            //*((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
-			//*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start+1));
-			//*((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
-			//*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
-			//*((half2*) (sh_B + double_buffer + thread4 + 32*16)) = __float22half2_rn(*(B_start + 8));
-			//*((half2*) (sh_B + double_buffer + thread4 + 32*16 + 2)) = __float22half2_rn(*(B_start + 9));
-			if ((blockIdx.y == N/32) && ((threadIdx.x/32) > ((N%32)>>3) - 1))
-			{
-				*((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn({0.f,0.f});
-				*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn({0.f,0.f});
-				*((half2*) (sh_B + double_buffer + thread4 + 32*16)) = __float22half2_rn({0.f,0.f});
-				*((half2*) (sh_B + double_buffer + thread4 + 32*16 + 2)) = __float22half2_rn({0.f,0.f});
-			}
-			else
-			{
-				*((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
-				*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
-				*((half2*) (sh_B + double_buffer + thread4 + 32*16)) = __float22half2_rn(*(B_start + 8));
-				*((half2*) (sh_B + double_buffer + thread4 + 32*16 + 2)) = __float22half2_rn(*(B_start + 9));
-			}
-        }
-		else if (k + 16 < K)
-		{
-            A_start += M << 4; // half2 --> 8M
-			
-			if (threadIdx.x < 64)
-			{
-				*((half2*)(sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
-				*((half2*)(sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
-				*((half2*)(sh_A + double_buffer + thread4 + 16*32)) = __float22half2_rn(*(A_start + 8));
-				*((half2*)(sh_A + double_buffer + thread4 + 16*32 + 2)) = __float22half2_rn(*(A_start + 9));
-			}
-			else
-			{
-				*((half2*)(sh_A + double_buffer + thread4)) = __float22half2_rn({0.f, 0.f});
-				*((half2*)(sh_A + double_buffer + thread4 + 2)) = __float22half2_rn({0.f, 0.f});
-				*((half2*)(sh_A + double_buffer + thread4 + 16*32)) = __float22half2_rn({0.f, 0.f});
-				*((half2*)(sh_A + double_buffer + thread4 + 16*32 + 2)) = __float22half2_rn({0.f, 0.f});			
-			}
-	
-            B_start += 16;
-			
-			if (threadIdx.x < 64)
-			{
-				if ((blockIdx.y == N/32) && ((threadIdx.x/32) > ((N%32)>>3) - 1))
-				{
-					*((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn({0.f,0.f});
-					*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn({0.f,0.f});
-					*((half2*) (sh_B + double_buffer + thread4 + 32*16)) = __float22half2_rn({0.f,0.f});
-					*((half2*) (sh_B + double_buffer + thread4 + 32*16 + 2)) = __float22half2_rn({0.f,0.f});
-				}
-				else
-				{
-					*((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
-					*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
-					*((half2*) (sh_B + double_buffer + thread4 + 32*16)) = __float22half2_rn(*(B_start + 8));
-					*((half2*) (sh_B + double_buffer + thread4 + 32*16 + 2)) = __float22half2_rn(*(B_start + 9));
-				}
-			}
-			else
-			{
-					*((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn({0.f,0.f});
-					*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn({0.f,0.f});
-					*((half2*) (sh_B + double_buffer + thread4 + 32*16)) = __float22half2_rn({0.f,0.f});
-					*((half2*) (sh_B + double_buffer + thread4 + 32*16 + 2)) = __float22half2_rn({0.f,0.f});
-			}
-		}
-    }
-	
-	// Store the output
-	int x = (((threadIdx.x>>5)&1)<<4);
-	
-	//wmma::store_matrix_sync(C + block_base_y + (block_base_x + x) * M + ((threadIdx.x>>6)<<4), acc_frag, M, wmma::mem_col_major);
-
-    if (blockIdx.y < N/32)
-    {
-		// Store the output
-		wmma::store_matrix_sync(C + block_base_y + (block_base_x + x) * M + ((threadIdx.x>>6)<<4), acc_frag, M, wmma::mem_col_major);	
-    }
-    else
-    {
-		// Store the output
-	   //int C_offset = C + block_base_y + (block_base_x + x) * M + ((threadIdx.x>>6)<<4) + ((threadIdx.x%32)/2)*M + ((threadIdx.x %32)/2)*8;
-	   int C_offset = block_base_y + (block_base_x + x) * M + ((threadIdx.x>>6)<<4) + ((threadIdx.x & 31)>>1)*M + ((threadIdx.x & 31)>>1)<<3;
-	   
-	   wmma::store_matrix_sync(sh_c, acc_frag, 16, wmma::mem_col_major);
-	   
-	   if (C_offset/M < N)
-	   {
-		   reg_C[0].x = sh_c[(threadIdx.x<<3)];
-		   reg_C[0].y = sh_c[(threadIdx.x<<3) + 1];
-		   reg_C[0].z = sh_c[(threadIdx.x<<3) + 2];
-		   reg_C[0].w = sh_c[(threadIdx.x<<3) + 3];
-		   *((float4*)(C+C_offset)) = reg_C[0];
-		   
-		   reg_C[1].x = sh_c[(threadIdx.x<<3) + 4];
-		   reg_C[1].y = sh_c[(threadIdx.x<<3) + 5];
-		   reg_C[1].z = sh_c[(threadIdx.x<<3) + 6];
-		   reg_C[1].w = sh_c[(threadIdx.x<<3) + 7];
-		   *((float4*)(C+C_offset+4)) = reg_C[1];
-	   }
-    }
-}
-
-
-
-// 128 threads，N不能被32整除，可以被8整除; M不能被32整除
-__device__ void fp16gemm_32x32_tensor4_M1_N8(int M, int N, int K, int P, int Q, float *A, float *B, float *C, , float *sh) {
-
-	//__shared__ half sh_A[2048];
-	//__shared__ half sh_B[2048];  // 2*32*32
-	
-    half* sh_A = sh;
-    half* sh_B = (sh + 2048);	
-	
-	__shared__ float sh_c[256];  // 16*16
-	
-	float reg_C;
-	
-	int im4 = threadIdx.x & 3;
-	int id4 = threadIdx.x >> 2;
-	
-	//int thread2 = threadIdx.x << 1;
-	int thread4 = threadIdx.x << 2;
-
-    // Compute block's starting coordinate
-    int block_base_x = blockIdx.y << 5;
-    int block_base_y = blockIdx.x << 5;
-
-    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
-    float *A_start = (A + block_base_y + (im4 << 2) + (id4)*M);
-    //*((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
-	//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
-    //*((half2*)(sh_A + thread4 + 16*32)) = __float22half2_rn(*(A_start + 8));
-	//*((half2*)(sh_A + thread4 + 16*32 + 2)) = __float22half2_rn(*(A_start + 9));
-
-	if (blockIdx.x == 2)
-	{
-		if (im4 == 0)
-		{
-			*(sh_A + thread4) = __float2half_rn(*(A_start));
-		}
-		else
-		{
-			*(sh_A + thread4) = __float2half_rn(0.f);
-		}
-		
-		//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn({0.f, 0.f});
-		*(sh_A + thread4 + 1) = __float2half_rn(0.f);
-		*(sh_A + thread4 + 2) = __float2half_rn(0.f);
-		*(sh_A + thread4 + 3) = __float2half_rn(0.f);
-		
-		*(sh_A + thread4 + 16) = __float2half_rn(0.f);
-		*(sh_A + thread4 + 17) = __float2half_rn(0.f);
-		*(sh_A + thread4 + 18) = __float2half_rn(0.f);
-		*(sh_A + thread4 + 19) = __float2half_rn(0.f);
-	}
-	else
-	{
-		//*((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
-		//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
-		*(sh_A + thread4) = __float2half_rn(*(A_start));
-		*(sh_A + thread4 + 1) = __float2half_rn(*(A_start+1));
-		*(sh_A + thread4 + 2) = __float2half_rn(*(A_start+2));
-		*(sh_A + thread4 + 3) = __float2half_rn(*(A_start+3));
-		
-		*(sh_A + thread4 + 16) = __float2half_rn(*(A_start+16));
-		*(sh_A + thread4 + 17) = __float2half_rn(*(A_start+17));
-		*(sh_A + thread4 + 18) = __float2half_rn(*(A_start+18));
-		*(sh_A + thread4 + 19) = __float2half_rn(*(A_start+19));
-	}	
-
-    //load B from global memory to shared memory
-	float2 *B_start = (float2*) (B + K*block_base_x + (im4 << 2) + (id4)*K);
-    //float2 *B_start = (float2*) (B + K*(im16+block_base_x) + (id16 << 1));
-	if ((blockIdx.y == N/32) && ((threadIdx.x/32) > ((N%32)>>3) - 1))
-	{
-		*((half2*) (sh_B + thread4)) = __float22half2_rn({0.f,0.f});
-		*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn({0.f,0.f});
-		*((half2*) (sh_B + thread4 + 32*16)) = __float22half2_rn({0.f,0.f});
-		*((half2*) (sh_B + thread4 + 32*16 + 2)) = __float22half2_rn({0.f,0.f});
-	}
-	else
-	{
-		*((half2*) (sh_B + thread4)) = __float22half2_rn(*(B_start));
-		*((half2*) (sh_B + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
-		*((half2*) (sh_B + thread4 + 32*16)) = __float22half2_rn(*(B_start + 8));
-		*((half2*) (sh_B + thread4 + 32*16 + 2)) = __float22half2_rn(*(B_start + 9));
-	}
-	
-    int double_buffer = 0;
-	int offset_a = 0;
-	int offset_b = 0;
-	
-    // Declare the fragments
-	wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> a_frag[2];
-	wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half, wmma::col_major> b_frag[2];
-    wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> acc_frag;
-    //wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
-
-    wmma::fill_fragment(acc_frag, 0.0f);
-   
-#pragma unroll
-    for(int k = 0; k < K; k += 32)
-	{
-        __syncthreads();
-		
-		offset_a = (threadIdx.x/64)<<9;  // 0, 0, 512,512;  
-		offset_b =  ((threadIdx.x>>5) & 1)<<8; //0, 256, 0, 256;
-		
-		// Load the inputs
-		wmma::load_matrix_sync(a_frag[0], sh_A + double_buffer + offset_a, 16);
-		wmma::load_matrix_sync(b_frag[0], sh_B + double_buffer + offset_b, 16);
- 
-		// Perform the matrix multiplication
-		wmma::mma_sync(acc_frag, a_frag[0], b_frag[0], acc_frag);
-		
-		offset_a += 256 ;  //  256, 256, 768, 768;
-		offset_b += 512 ;  //  512, 768, 512, 768;
-
-		// Load the inputs
-		wmma::load_matrix_sync(a_frag[1], sh_A + double_buffer + offset_a, 16);
-		wmma::load_matrix_sync(b_frag[1], sh_B + double_buffer + offset_b, 16);
- 
-		// Perform the matrix multiplication
-		wmma::mma_sync(acc_frag, a_frag[1], b_frag[1], acc_frag);		
-
-        double_buffer ^= 1024;  // 32*32
-		
-        if (k + 32 < K)
-		{
-            A_start += M << 5; // half2 --> 8M
-			//*((half2*)(sh_A + double_buffer + thread4)) = __float22half2_rn(*(A_start));
-			//*((half2*)(sh_A + double_buffer + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
-			//*((half2*)(sh_A + double_buffer + thread4 + 16*32)) = __float22half2_rn(*(A_start + 8));
-			//*((half2*)(sh_A + double_buffer + thread4 + 16*32 + 2)) = __float22half2_rn(*(A_start + 9));
-			if (blockIdx.x == 2)
-			{
-				if (im4 == 0)
-				{
-					*(sh_A + double_buffer + thread4) = __float2half_rn(*(A_start));
-				}
-				else
-				{
-					*(sh_A + double_buffer + thread4) = __float2half_rn(0.f);
-				}
-				
-				//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn({0.f, 0.f});
-				*(sh_A + double_buffer + thread4 + 1) = __float2half_rn(0.f);
-				*(sh_A + double_buffer + thread4 + 2) = __float2half_rn(0.f);
-				*(sh_A + double_buffer + thread4 + 3) = __float2half_rn(0.f);
-				
-				*(sh_A + double_buffer + thread4 + 16) = __float2half_rn(0.f);
-				*(sh_A + double_buffer + thread4 + 17) = __float2half_rn(0.f);
-				*(sh_A + double_buffer + thread4 + 18) = __float2half_rn(0.f);
-				*(sh_A + double_buffer + thread4 + 19) = __float2half_rn(0.f);
-			}
-			else
-			{
-				//*((half2*)(sh_A + thread4)) = __float22half2_rn(*(A_start));
-				//*((half2*)(sh_A + thread4 + 2)) = __float22half2_rn(*(A_start + 1));
-				*(sh_A + double_buffer + thread4) = __float2half_rn(*(A_start));
-				*(sh_A + double_buffer + thread4 + 1) = __float2half_rn(*(A_start+1));
-				*(sh_A + double_buffer + thread4 + 2) = __float2half_rn(*(A_start+2));
-				*(sh_A + double_buffer + thread4 + 3) = __float2half_rn(*(A_start+3));
-				
-				*(sh_A + double_buffer + thread4 + 16) = __float2half_rn(*(A_start+16));
-				*(sh_A + double_buffer + thread4 + 17) = __float2half_rn(*(A_start+17));
-				*(sh_A + double_buffer + thread4 + 18) = __float2half_rn(*(A_start+18));
-				*(sh_A + double_buffer + thread4 + 19) = __float2half_rn(*(A_start+19));
-			}		
-            B_start += 16;
-			if ((blockIdx.y == N/32) && ((threadIdx.x/32) > ((N%32)>>3) - 1))
-			{
-				*((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn({0.f,0.f});
-				*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn({0.f,0.f});
-				*((half2*) (sh_B + double_buffer + thread4 + 32*16)) = __float22half2_rn({0.f,0.f});
-				*((half2*) (sh_B + double_buffer + thread4 + 32*16 + 2)) = __float22half2_rn({0.f,0.f});
-			}
-			else
-			{
-				*((half2*) (sh_B + double_buffer + thread4)) = __float22half2_rn(*(B_start));
-				*((half2*) (sh_B + double_buffer + thread4 + 2)) = __float22half2_rn(*(B_start + 1));
-				*((half2*) (sh_B + double_buffer + thread4 + 32*16)) = __float22half2_rn(*(B_start + 8));
-				*((half2*) (sh_B + double_buffer + thread4 + 32*16 + 2)) = __float22half2_rn(*(B_start + 9));
-			}			
-        }
-    }
-	
-	// Store the output
-	int x = (((threadIdx.x>>5)&1)<<4);
-	
-	//wmma::store_matrix_sync(C + block_base_y + (block_base_x + x) * M + ((threadIdx.x>>6)<<4), acc_frag, M, wmma::mem_col_major);
-
-    if (blockIdx.x < M/32)
-    {
-		// Store the output
-		wmma::store_matrix_sync(C + block_base_y + (block_base_x + x) * M + ((threadIdx.x>>6)<<4), acc_frag, M, wmma::mem_col_major);	
-    }
-    else
-    {
-	   // Store the output
-	   //int C_offset = C + block_base_y + (block_base_x + x) * M + ((threadIdx.x>>6)<<4) + ((threadIdx.x%32)/2)*M + ((threadIdx.x %32)/2)*8;
-	   int C_offset = block_base_y + (block_base_x + x) * M + ((threadIdx.x>>6)<<4) + ((threadIdx.x & 31)>>1)*M + ((threadIdx.x & 31)>>1)<<3;
-	   
-	   wmma::store_matrix_sync(sh_c, acc_frag, 16, wmma::mem_col_major);
-	   
-	   if ((threadIdx.x < 64) && ((threadIdx.x%2) == 0))
-	   {
-		   reg_C = sh_c[(threadIdx.x<<3)];
-		  *(C+C_offset) = reg_C;
-	   }
-    }
-}
-
-
-
-// 16*8 subtile_K = 8
-__device__ void gemm_32_16x8_3(int M, int N, int K, int P, int Q, float *A, float *B, float *C, , float *sh){
-
-	//__shared__ float sh_A[256];
-    //__shared__ float sh_B[128];
-   float* sh_A = sh;
-   float* sh_B = (sh + 256);		
-
-    float4 reg_C;
-	reg_C.x =0.f;
-	reg_C.y =0.f;
-	reg_C.z =0.f;
-	reg_C.w =0.f;
-
-    float reg_A[8];
-    //float4 reg_A[2];
-    float reg_B[2];
-
-    // Compute block's starting coordinate
-    int block_base_x = blockIdx.y*8;
-    int block_base_y = blockIdx.x*16;
-
-    //load A from global memory to shared memory  sgemm中A和B是分别用两个warp载入的
-    int A_start = block_base_y + (threadIdx.x%4)*4 + (threadIdx.x/4)*M;
-    *(sh_A + 4*threadIdx.x) = A[A_start%(M*K)];
-	*(sh_A + 4*threadIdx.x+1) = A[(A_start+1)%(M*K)];
-	*(sh_A + 4*threadIdx.x+2) = A[(A_start+2)%(M*K)];
-	*(sh_A + 4*threadIdx.x+3) = A[(A_start+3)%(M*K)];
-
-    //load B from global memory to shared memory
-    float2 *B_start = (float2*) (B + K*block_base_x + (threadIdx.x/8)*2 + (threadIdx.x%8)*K);
-    *((float2*) (sh_B + 2*threadIdx.x)) = *(B_start);
-
-    int double_buffer_A = 0;
-	int double_buffer_B = 0;
-#pragma unroll
-    for(int k = 0; k < K; k += 8)
-	{
-        __syncthreads();
-        int A_offset = double_buffer_A + (threadIdx.x%4)*4;
-        int B_offset = double_buffer_B + ((threadIdx.x/4)*2);	
-		
-#pragma unroll
-        for (int i=0; i<8; i+=2)   // 全部展开有register spill吗
-		{
-            reg_A[0] = sh_A[A_offset];    // A_offset+0 ~ A_offset+3 为什么不用向量呢
-            reg_A[1] = sh_A[A_offset+1];  // 为了避免bank冲突, 这8个寄存器都不是连续的【4个就不会重复】，因此不能使用向量传输指令
-            reg_A[2] = sh_A[A_offset+2];
-            reg_A[3] = sh_A[A_offset+3];
-	   // *(float4*)reg_A = *(float4*)(sh_A+A_offset);
-	    reg_A[4] = sh_A[A_offset+16];
-            reg_A[5] = sh_A[A_offset+17];
-            reg_A[6] = sh_A[A_offset+18];
-            reg_A[7] = sh_A[A_offset+19];
-	   //*(float4*)(reg_A+4) = *(float4*)(sh_A+A_offset+16);
-	    reg_B[0] = sh_B[B_offset];
-			
-            reg_C.x = fma(reg_A[0], reg_B[0], reg_C.x); // reg_C.x = reg_A[0]*reg_B[0] + reg_A[4]*reg_B[1]
-            reg_C.y = fma(reg_A[1], reg_B[0], reg_C.y);
-            reg_C.z = fma(reg_A[2], reg_B[0], reg_C.z);
-            reg_C.w = fma(reg_A[3], reg_B[0], reg_C.w);
-			
-		//	reg_B[0] = sh_B[B_offset];
-			reg_B[1] = sh_B[B_offset+1];
-			
-            reg_C.x = fma(reg_A[4], reg_B[1], reg_C.x);
-            reg_C.y = fma(reg_A[5], reg_B[1], reg_C.y);
-            reg_C.z = fma(reg_A[6], reg_B[1], reg_C.z);
-            reg_C.w = fma(reg_A[7], reg_B[1], reg_C.w);
-
-            A_offset += 32;
-            B_offset += 16;
-        }
-		
-        double_buffer_A ^= 128;
-		double_buffer_B ^= 64;
-		
-        if (k + 8 < K)
-		{
-            A_start += 8*M; // float2 --> 8M
-			*(sh_A + double_buffer_A + 4*threadIdx.x) = A[A_start%(M*K)];
-			*(sh_A + double_buffer_A + 4*threadIdx.x+1) = A[(A_start+1)%(M*K)];
-			*(sh_A + double_buffer_A + 4*threadIdx.x+2) = A[(A_start+2)%(M*K)];
-			*(sh_A + double_buffer_A + 4*threadIdx.x+3) = A[(A_start+3)%(M*K)];
-            B_start += 4;
-            *((float2*) (sh_B + double_buffer_B + 2*threadIdx.x)) = *(B_start);
-        }
-    }
-
-	int ind = blockIdx.x*16 + (threadIdx.x%4)*4;  // 横、纵坐标  M=HW， K = C， N = K
-	// blockIdx.x*16 < (M + (0)*16) ;  M%16 == 0 && P%2 == 0 ;   relu = max(0, x)
-    int	PQ = M;
-    int C_offset = ind%(PQ) + (threadIdx.x/4)*(PQ) + blockIdx.y*8*(PQ);
-	
-    if (blockIdx.x < M/16)
-    {
-		C[C_offset] = reg_C.x;
-		C[C_offset+1] = reg_C.y;
-		C[C_offset+2] = reg_C.z;
-		C[C_offset+3] = reg_C.w;		
-    }
-    else
-    {
-       int ruler = (threadIdx.x%4)*4;
-       //int rag = M%16;
-	   
-       if (ruler == 0)
-	   {
-           C[C_offset] = reg_C.x;
-	   }
-    }
-}
-
-
-
-
-
-
-
-
 __global__ void gemm_4_2(int M, int N1, int N2, int N3, int N4, 
 					   int K, int P, int Q, 
 					   float *A1, float *A2, 
@@ -2335,9 +1423,11 @@ __global__ void gemm_4_2(int M, int N1, int N2, int N3, int N4,
    			//(N*P*Q)%16==0 && (P*Q)%4==0
    			//gemm_64_16x16_1(M, N, K, P, Q, A, B, C, sh);
 			//gemm_32_16x16_tc(M, N, K, P, Q, A, B, C, sh);
-			//fp16gemm_16x16_1(M, N, K, P, Q, A, B, C, sh);  // half
-			//fp16gemm_16x16_tensor(M, N, K, P, Q, A, B, C, sh);  // tensor
-			gemm_32_16x8_1(M, N, K, P, Q, A, B, C, sh); 
+			//if(M == 784)
+			//	fp16gemm_16x16_1(M, N, K, P, Q, A, B, C, sh);  // half
+			//else
+			//  gemm_64_16x16_1(M,N,K,P,Q,A,B,C,sh);
+			fp16gemm_16x16_tensor(M, N, K, P, Q, A, B, C, sh);  // tensor
    		}
    		else if (M%16 == 0)
 		{
@@ -2349,15 +1439,12 @@ __global__ void gemm_4_2(int M, int N1, int N2, int N3, int N4,
    			//(N*P*Q%16!=0)
    			//gemm_64_16x16_3(M, N, K, P, Q, A, B, C, sh);
 			//fp16gemm_16x16_3(M, N, K, P, Q, A, B, C, sh); // half
-			//gemm_64_16x16_3_tensor(M, N, K, P, Q, A, B, C, sh); // tensor
-			gemm_32_16x8_3(M, N, K, P, Q, A, B, C, sh); 
+			gemm_64_16x16_3_tensor(M, N, K, P, Q, A, B, C, sh); // tensor
     	}
     }
 }
 
-
-
-__global__ void gemm_4_t(int M, int N1, int N2, int N3, int N4, 
+__global__ void gemm_4_20(int M, int N1, int N2, int N3, int N4, 
 					   int K, int P, int Q, 
 					   float *A1, float *A2, 
 					   float *B1, float *B2, float *B3, float *B4,
@@ -2397,34 +1484,32 @@ __global__ void gemm_4_t(int M, int N1, int N2, int N3, int N4,
 			break;
     }
 
-    if (blockIdx.x*32 < (M + (M%32!=0)*32) && blockIdx.y*32 < (N + (N%32!=0)*32))  // 剔除空的Block
+    if (blockIdx.x*16 < (M + (M%16!=0)*16) && blockIdx.y*16 < (N + (N%16!=0)*16))  // 剔除空的Block
 	{
 		// N是不是16的整数倍
-   		if (M%32 == 0 && N%32 == 0 && K%32 == 0)
+   		if (M == 784)
 		{
    			//(N*P*Q)%16==0 && (P*Q)%4==0
    			//gemm_64_16x16_1(M, N, K, P, Q, A, B, C, sh);
 			//gemm_32_16x16_tc(M, N, K, P, Q, A, B, C, sh);
-			//fp16gemm_16x16_1(M, N, K, P, Q, A, B, C, sh);  // half
-			//fp16gemm_16x16_tensor(M, N, K, P, Q, A, B, C, sh);  // tensor
-			//gemm_32_16x8_1(M, N, K, P, Q, A, B, C, sh);
-			fp16gemm_32x32_tensor4(M, N, K, P, Q, A, B, C, sh);
+			//if(M == 784)
+			//	fp16gemm_16x16_1(M, N, K, P, Q, A, B, C, sh);  // half
+			//else
+			//  gemm_64_16x16_1(M,N,K,P,Q,A,B,C,sh);
+			fp16gemm_16x16_tensor(M, N, K, P, Q, A, B, C, sh);  // tensor
    		}
-   		else if (M%32 == 0 && N%8 == 0)
+   		else if (M == 196)
 		{
     		//(N*P*Q)%16==0 && (P*Q)%4!=0
-			if (K%32 == 0)
-				fp16gemm_32x32_tensor4_N8(M, N, K, P, Q, A, B, C, sh);
-			else
-				fp16gemm_32x32_tensor4_N8_K16(M, N, K, P, Q, A, B, C, sh);
+   			//gemm_64_16x16_2(M, N, K, P, Q, A, B, C, sh);
+			fp16gemm_16x16_tensor0(M, N, K, P, Q, A, B, C, sh);  // tensor
    		}
-   		else if (M%32 != 0)
+   		else
 		{
    			//(N*P*Q%16!=0)
    			//gemm_64_16x16_3(M, N, K, P, Q, A, B, C, sh);
 			//fp16gemm_16x16_3(M, N, K, P, Q, A, B, C, sh); // half
-			//gemm_64_16x16_3_tensor(M, N, K, P, Q, A, B, C, sh); // tensor
-			fp16gemm_32x32_tensor4_M1_N8(M, N, K, P, Q, A, B, C, sh);
+			gemm_64_16x16_3_tensor0(M, N, K, P, Q, A, B, C, sh); // tensor
     	}
     }
 }
