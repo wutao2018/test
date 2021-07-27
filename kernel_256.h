@@ -444,10 +444,13 @@ __device__ void gemm_256_64x64__orig(int M, int N, int K, float *A, float *B, fl
 }
 
 // 256 threads, 64x64 tile, k = 16
-__device__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float *C, float *sh){
+__device__ void gemm_256_64x64_16_0(int M, int N, int K, float *A, float *B, float *C, float *sh){
 	
-	__shared__ float sh_A[2048];
-	__shared__ float sh_B[2048];
+	//__shared__ float sh_A[2048];
+	//__shared__ float sh_B[2048];
+	
+    float *sh_A = sh;
+	float *sh_B = sh + 2048;
 
 	float4 reg_C[4];
 	float4 reg_A[2];
@@ -469,8 +472,8 @@ __device__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 	float4 *C_start = (float4*) (C + block_base_x*M + block_base_y + (im8<<2) + (id8)*M);
     reg_C[0] = *C_start;
 	reg_C[1] = *(C_start + 8);
-	reg_C[2] = *(C_start + 8*M);
-	reg_C[3] = *(C_start + 8 + 8*M);
+	reg_C[2] = *(C_start + m8);
+	reg_C[3] = *(C_start + 8 + m8);
 	
 	//load A from global memory to shared memory
 	float4 *A_start = (float4*) (A + block_base_y + (im16<<2) + (id16)*M); 
@@ -479,7 +482,7 @@ __device__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 	//load B from global memory to shared memory
 	float2 *B_start = (float2*) (B + K*block_base_x + (id64)*2 + (im64)*K); 
 	*((float2*) (sh_B + 2*threadIdx.x)) = *(B_start);
-	*((float2*) (sh_B + 2*threadIdx.x + 64*8)) = *(B_start+4);
+	*((float2*) (sh_B + 2*threadIdx.x + 512)) = *(B_start+4);
 	
 	int double_buffer = 0;
 #pragma unroll
@@ -531,7 +534,7 @@ __device__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 			
 			B_start += 8; 
 			*((float2*) (sh_B + double_buffer + 2*threadIdx.x)) = *(B_start);
-			*((float2*) (sh_B + double_buffer + 2*threadIdx.x + 64*8)) = *(B_start+4);
+			*((float2*) (sh_B + double_buffer + 2*threadIdx.x + 512)) = *(B_start+4);
 		}
 	}
 	
@@ -541,6 +544,107 @@ __device__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 	*(C_start + 8 + m8) = reg_C[3];
 }
 
+
+// 256 threads, 64x64 tile, k = 16
+__device__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float *C, float *sh){
+	
+	//__shared__ float sh_A[2048];
+	//__shared__ float sh_B[2048];
+	
+    float *sh_A = sh;
+	float *sh_B = sh + 2048;
+
+	float4 reg_C0, reg_C1, reg_C2, reg_C3;
+	float4 reg_A0, reg_A1;
+	float  reg_B0, reg_B1;
+	
+	int m8 = M<<3;
+	int im8 = threadIdx.x&7;
+	int id8 = threadIdx.x>>3;
+	int im16 = threadIdx.x&15;
+	int id16 = threadIdx.x>>4;
+	int im64 = threadIdx.x&63;
+	int id64 = threadIdx.x>>6;
+	
+	// Compute block's starting coordinate
+	int block_base_x = blockIdx.y<<6;
+	int block_base_y = blockIdx.x<<6;
+
+	//Load C from global memory to register file
+	float4 *C_start = (float4*) (C + block_base_x*M + block_base_y + (im8<<2) + (id8)*M);
+    reg_C0 = *C_start;
+	reg_C1 = *(C_start + 8);
+	reg_C2 = *(C_start + m8);
+	reg_C3 = *(C_start + 8 + m8);
+	
+	//load A from global memory to shared memory
+	float4 *A_start = (float4*) (A + block_base_y + (im16<<2) + (id16)*M); 
+	*((float4*) (sh_A + 4*threadIdx.x)) = *(A_start);
+
+	//load B from global memory to shared memory
+	float2 *B_start = (float2*) (B + K*block_base_x + (id64)*2 + (im64)*K); 
+	*((float2*) (sh_B + 2*threadIdx.x)) = *(B_start);
+	*((float2*) (sh_B + 2*threadIdx.x + 512)) = *(B_start+4);
+	
+	int double_buffer = 0;
+#pragma unroll
+	for(int k=0; k<K; k+=16)
+	{
+		__syncthreads();
+		int A_offset = double_buffer + (im8<<2);
+		int B_offset = double_buffer + (id8<<1);
+
+#pragma unroll
+		for (int i=0; i<16; ++i)
+		{
+			reg_A0 = *((float4*) (sh_A + A_offset)); 
+			reg_A1 = *((float4*) (sh_A + A_offset + 32)); 
+			reg_B0 = sh_B[B_offset];
+			reg_B1 = sh_B[B_offset + 64];
+
+			reg_C0.x = fma(reg_A0.x, reg_B0, reg_C0.x);
+			reg_C0.y = fma(reg_A0.y, reg_B0, reg_C0.y);
+			reg_C0.z = fma(reg_A0.z, reg_B0, reg_C0.z);
+			reg_C0.w = fma(reg_A0.w, reg_B0, reg_C0.w);
+
+			reg_C1.x = fma(reg_A1.x, reg_B0, reg_C1.x);
+			reg_C1.y = fma(reg_A1.y, reg_B0, reg_C1.y);
+			reg_C1.z = fma(reg_A1.z, reg_B0, reg_C1.z);
+			reg_C1.w = fma(reg_A1.w, reg_B0, reg_C1.w);
+
+			reg_C2.x = fma(reg_A0.x, reg_B1, reg_C2.x);
+			reg_C2.y = fma(reg_A0.y, reg_B1, reg_C2.y);
+			reg_C2.z = fma(reg_A0.z, reg_B1, reg_C2.z);
+			reg_C2.w = fma(reg_A0.w, reg_B1, reg_C2.w);
+
+			reg_C3.x = fma(reg_A1.x, reg_B1, reg_C3.x);
+			reg_C3.y = fma(reg_A1.y, reg_B1, reg_C3.y);
+			reg_C3.z = fma(reg_A1.z, reg_B1, reg_C3.z);
+			reg_C3.w = fma(reg_A1.w, reg_B1, reg_C3.w);
+			
+			A_offset += 64;
+			B_offset += 1 + (i&1)*126;
+			//if (i%2) B_offset += 126;
+		}
+
+		double_buffer ^= 1024;
+
+		if (k+16 < K)
+		{
+			A_start += M<<2; 
+			*((float4*) (sh_A + double_buffer + 4*threadIdx.x)) = *(A_start);
+			
+			B_start += 8; 
+			*((float2*) (sh_B + double_buffer + 2*threadIdx.x)) = *(B_start);
+			*((float2*) (sh_B + double_buffer + 2*threadIdx.x + 512)) = *(B_start+4);
+		}
+	}
+	
+	*(C_start) = reg_C0;
+	*(C_start + 8) = reg_C1;
+	*(C_start + m8) = reg_C2;
+	*(C_start + 8 + m8) = reg_C3;
+}
 
 // 256 threads, 128x64 tile, k = 8
 __device__ void gemm_256_128x64(int M, int N, int K, float *A, float *B, float *C, float *sh){
