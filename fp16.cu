@@ -2796,6 +2796,22 @@ __global__ void gemm_256_128x64(int M, int N, int K, float *A, float *B, float *
 }
 
 
+__global__ void matrixMulGPU(  float *A, float *B, float *C, int M, int N, int K)
+{
+  int val = 0;
+
+  int row = blockIdx.x * blockDim.x + threadIdx.x;
+  int col = blockIdx.y * blockDim.y + threadIdx.y;
+
+  if (row < M && col < N)
+  {
+    for ( int k = 0; k < K; ++k )
+      val += A[row + k*M] * B[k + col*K];
+    C[row + col*M] = val;
+  }
+}
+
+
 
 int main(int argc, char* argv[]) 
 {
@@ -2887,7 +2903,7 @@ int main(int argc, char* argv[])
    dim3 gridDim3;
    dim3 blockDim3;
    gridDim3.x = MATRIX_M/16; gridDim3.y = MATRIX_N/16; gridDim3.z = 1;
-   blockDim3.x = 64; blockDim3.y = 1; blockDim3.z = 1;
+   blockDim3.x = 256; blockDim3.y = 1; blockDim3.z = 1;
    
    dim3 gridDim4;
    dim3 blockDim4;
@@ -2897,6 +2913,7 @@ int main(int argc, char* argv[])
    printf("Running with wmma...\n");
    cudaErrCheck(cudaEventRecord(startWMMA));
    
+   matrixMulGPU<<< gridDim3, blockDim3 >>>(a_fp32, b_fp32, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K);
    //convertFp32ToFp16 <<< (MATRIX_M * MATRIX_K + 255) / 256, 256 >>> (a_fp16, a_fp32, MATRIX_M * MATRIX_K);
    //convertFp32ToFp16 <<< (MATRIX_K * MATRIX_N + 255) / 256, 256 >>> (b_fp16, b_fp32, MATRIX_K * MATRIX_N);
    // wmma_example <<< gridDim, blockDim >>> (a_fp16, b_fp16, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);   
@@ -2904,7 +2921,7 @@ int main(int argc, char* argv[])
    // fp16gemm_256<<< gridDim2, blockDim2 >>> (a_fp32, b_fp32, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
    //fp16gemm_16x16<<< gridDim3, blockDim3 >>>(a_fp32, b_fp32, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
    //fp16gemm_16x16_tensor<<< gridDim3, blockDim3 >>>(a_fp32, b_fp32, c_wmma, MATRIX_M, MATRIX_N, MATRIX_K, alpha, beta);
-   gemm_64_16x16_3_tensor<<< gridDim3, blockDim3 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+   //gemm_64_16x16_3_tensor<<< gridDim3, blockDim3 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
    // gemm_256_32x32 <<< gridDim2, blockDim2 >>> (MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
    // verify
    //gemm_256_64x64_16<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
