@@ -2798,16 +2798,24 @@ __global__ void gemm_256_128x64(int M, int N, int K, float *A, float *B, float *
 
 __global__ void matrixMulGPU(  float *A, float *B, float *C, int M, int N, int K)
 {
-  int val = 0;
+  float val = 0.f; float val2 = 0.f;float val3 = 0.f;float val4 = 0.f;
 
-  int row = blockIdx.x * blockDim.x + threadIdx.x;
+  int row = blockIdx.x * blockDim.x + threadIdx.x*4;
   int col = blockIdx.y * blockDim.y + threadIdx.y;
 
   if (row < M && col < N)
   {
     for ( int k = 0; k < K; ++k )
-      val += A[row + k*M] * B[k + col*K];
+    {
+      	    val += A[row + k*M] * B[k + col*K];
+	    val2 += A[row + 1 + k*M] * B[k + (col+1)*K];
+	    val3 += A[row + 2 + k*M] * B[k + (col+2)*K];
+	    val4 += A[row + 3 + k*M] * B[k + (col+3)*K];
+    }
     C[row + col*M] = val;
+    C[row+1 + col*M] = val2;
+    C[row+2 + col*M] = val3;
+    C[row+3 + col*M] = val4;
   }
 }
 
