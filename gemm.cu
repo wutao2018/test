@@ -152,13 +152,14 @@ int  main (int argc, char** argv) {
     grid_size.x = M[0] / tile_size[t_strategy[0]][0];
     grid_size.y = N[0] / tile_size[t_strategy[0]][1];
 	grid_size.z = BATCH;
-	int max_size = 0;
+	int max_size1 = 0;
+	int max_size2 = 0;
 	for (int j=1; j<BATCH; ++j){
 		grid_size.x = (grid_size.x > M[j]/tile_size[t_strategy[j]][0])? (grid_size.x):(M[j]/tile_size[t_strategy[j]][0]);
 		grid_size.y = (grid_size.y > N[j]/tile_size[t_strategy[j]][1])? (grid_size.y):(N[j]/tile_size[t_strategy[j]][1]);
 		
-		if (tile_size[t_strategy[j]][1] > max_size) max_size = tile_size[t_strategy[j]][1];
-		if (tile_size[t_strategy[j]][0] > max_size) max_size = tile_size[t_strategy[j]][0];
+		if (tile_size[t_strategy[j]][1] > max_size1) max_size1 = tile_size[t_strategy[j]][1];
+		if (tile_size[t_strategy[j]][0] > max_size2) max_size2 = tile_size[t_strategy[j]][0];
 	}
 
 	//printf("grid paras = %d %d %d\n", grid_size.x, grid_size.y, grid_size.z);
@@ -168,14 +169,14 @@ int  main (int argc, char** argv) {
 	//}
 	
 	//warm-up
-	gemm<256><<<grid_size, block_size, sizeof(float)*4*128*16>>>(dev_M, dev_N, dev_K, dev_A, dev_B, dev_C, dev_T);
+	gemm<256><<<grid_size, block_size, sizeof(float)*2*(max_size1+max_size2)*16>>>(dev_M, dev_N, dev_K, dev_A, dev_B, dev_C, dev_T);
 	KernelErrChk();
 
 	ErrChk(cudaEventCreate(&start));
 	ErrChk(cudaEventRecord(start,0));
 
 	for (int run = 0; run<N_RUNS; ++run){
-		gemm<256><<<grid_size, block_size, sizeof(float)*max_size*64>>>(dev_M, dev_N, dev_K, dev_A, dev_B, dev_C, dev_T);
+		gemm<256><<<grid_size, block_size, sizeof(float)*(max_size1+maxsize2)*32>>>(dev_M, dev_N, dev_K, dev_A, dev_B, dev_C, dev_T);
 		KernelErrChk();
 	}
 
