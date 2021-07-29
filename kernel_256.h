@@ -1254,8 +1254,8 @@ __device__ void gemm_256_128x128_16(int M, int N, int K, float *A, float *B, flo
 	int md4 = M >>2;
 	int im16 = threadIdx.x & 15;
 	int id16 = threadIdx.x >> 4;	
-	int im32 = threadIdx.x & 31;
-	int id32 = threadIdx.x >> 5;
+	//int im32 = threadIdx.x & 31;
+	//int id32 = threadIdx.x >> 5;
 	int im128 = threadIdx.x & 127;
 	int id128 = threadIdx.x >> 7;	
 	int th8 = threadIdx.x << 3;
@@ -1287,9 +1287,9 @@ __device__ void gemm_256_128x128_16(int M, int N, int K, float *A, float *B, flo
 	reg_C[15] = *(C_start + 3*md4);
 
 	//load A from global memory to shared memory
-	float4 *A_start = (float4*) (A + block_base_y + (im32<<2) + (id32)*M); 
-	*((float4*) (sh_A + th4)) = *(A_start);
-	*((float4*) (sh_A + th4 + 2048)) = *(A_start+(M<<3));
+	float4 *A_start = (float4*) (A + block_base_y + (im16<<3) + (id16)*M); 
+	*((float4*) (sh_A + th8)) = *(A_start);
+	*((float4*) (sh_A + th8 + 4)) = *(A_start+1);
 
 	//load B from global memory to shared memory
 	float4 *B_start = (float4*) (B + K*(block_base_x + im128) + (id128<<3)); 
@@ -1401,20 +1401,20 @@ __device__ void gemm_256_128x128_16(int M, int N, int K, float *A, float *B, flo
 		double_buffer ^= 2048;
 
 		if (k+16 < K){
-			//long AA = (long)A_start + (M<<2);
-			A_start += (M<<2);
+			long AA = (long)A_start + (M<<4);
+			//A_start += (M<<2);
 			int tidss = double_buffer + th8;
-			//*((float4*) (sh_A + tidss)) =   *((float4*)AA); //*(A_start);
-			//*((float4*) (sh_A + tidss + 4)) = *((float4*)(AA+1)); //*(A_start+1);
-			*((float4*) (sh_A + double_buffer + th4)) = *(A_start);
-			*((float4*) (sh_A + double_buffer + th4 + 2048)) = *(A_start+(M<<3));
+			*((float4*) (sh_A + tidss)) =   *((float4*)AA); //*(A_start);
+			*((float4*) (sh_A + tidss + 4)) = *((float4*)AA+1); //*(A_start+1);
+			//*((float4*) (sh_A + double_buffer + th4)) = *(A_start);
+			//*((float4*) (sh_A + double_buffer + th4 + 2048)) = *(A_start+(M<<3));
 
-			B_start += 4;
-			//long BB = (long)B_start + 4;
-			//*((float4*) (sh_B + tidss)) = *((float4*)BB); //*(B_start);
-			//*((float4*) (sh_B + tidss + 4)) = *((float4*)(BB+1)); //*(B_start+1);
-			*((float4*) (sh_B + tidss)) = *(B_start);
-			*((float4*) (sh_B + tidss + 4)) = *(B_start+1);
+			//B_start += 4;
+			long BB = (long)B_start + 64;
+			*((float4*) (sh_B + tidss)) = *((float4*)BB); //*(B_start);
+			*((float4*) (sh_B + tidss + 4)) = *((float4*)BB+1); //*(B_start+1);
+			//*((float4*) (sh_B + tidss)) = *(B_start);
+			//*((float4*) (sh_B + tidss + 4)) = *(B_start+1);
 		}
 	}
 	
