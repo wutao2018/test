@@ -445,6 +445,14 @@ __device__ void gemm_256_64x64__orig(int M, int N, int K, float *A, float *B, fl
 
 // 256 threads, 64x64 tile, k = 16
 __device__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float *C, float *sh){
+
+	float *sh_A = sh;
+	float *sh_B = sh + 2048;
+
+	float4 reg_C[4];
+	float4 reg_A[2];
+	float  reg_B[2];
+	
 	int m8 = M<<3;
 	int im8 = threadIdx.x&7;
 	int id8 = threadIdx.x>>3;
@@ -456,38 +464,21 @@ __device__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 	// Compute block's starting coordinate
 	int block_base_x = blockIdx.y<<6;
 	int block_base_y = blockIdx.x<<6;
-	
-	//__shared__ float sh_A[2048];
-	//__shared__ float sh_B[2048];
-	float4 *C_start = (float4*) (C + block_base_x*M + block_base_y + (im8<<2) + (id8)*M);
-	float4 *A_start = (float4*) (A + block_base_y + (im16<<2) + (id16)*M);
-	float2 *B_start = (float2*) (B + K*block_base_x + (id64)*2 + (im64)*K); 
-	
-        float *sh_A = sh;
-	float *sh_B = sh + 2048;
-
-	float4 reg_C[4];
-	float4 reg_A[2];
-	float  reg_B[2];
-	
-
 
 	//Load C from global memory to register file
-	
-        reg_C[0] = *C_start;
+	float4 *C_start = (float4*) (C + block_base_x*M + block_base_y + (im8<<2) + (id8)*M);
+    reg_C[0] = *C_start;
 	reg_C[1] = *(C_start + 8);
-	
 	reg_C[2] = *(C_start + m8);
 	reg_C[3] = *(C_start + 8 + m8);
 	
 	//load A from global memory to shared memory
-	*((float2*) (sh_B + 2*threadIdx.x)) = *(B_start);	
+	float4 *A_start = (float4*) ((long)A + block_base_y + (im16<<2) + (id16)*M); 
 	*((float4*) (sh_A + 4*threadIdx.x)) = *(A_start);
 
 	//load B from global memory to shared memory
-	
-
-	*((float2*) (sh_B + 2*threadIdx.x + 512)) = *(B_start+4);
+	float4 *B_start = (float4*) (B + K*block_base_x + (id64<<2) + (im64)*K); 
+	*((float4*) (sh_B + 4*threadIdx.x)) = *(B_start);
 	
 	int double_buffer = 0;
 #pragma unroll
@@ -503,7 +494,7 @@ __device__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 			reg_A[0] = *((float4*) (sh_A + A_offset)); 
 			reg_A[1] = *((float4*) (sh_A + A_offset + 32)); 
 			reg_B[0] = sh_B[B_offset];
-			reg_B[1] = sh_B[B_offset + 64];
+			reg_B[1] = sh_B[B_offset + 128];
 
 			reg_C[0].x = fma(reg_A[0].x, reg_B[0], reg_C[0].x);
 			reg_C[0].y = fma(reg_A[0].y, reg_B[0], reg_C[0].y);
@@ -527,18 +518,18 @@ __device__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 			
 			A_offset += 64;
 			B_offset += 1;
-			if (i%2) B_offset += 126;
+			if (((i+1)&3) == 0) B_offset += 252;
 		}
 
 		double_buffer ^= 1024;
 
 		if (k+16 < K)
 		{
-			B_start += 8; 
 			A_start += M<<2; 
-			*((float2*) (sh_B + double_buffer + 2*threadIdx.x)) = *(B_start);
 			*((float4*) (sh_A + double_buffer + 4*threadIdx.x)) = *(A_start);
-			*((float2*) (sh_B + double_buffer + 2*threadIdx.x + 512)) = *(B_start+4);
+
+			B_start += 4; 
+			*((float4*) (sh_B + double_buffer + 4*threadIdx.x)) = *(B_start);
 		}
 	}
 	
@@ -548,107 +539,6 @@ __device__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 	*(C_start + 8 + m8) = reg_C[3];
 }
 
-
-// 256 threads, 64x64 tile, k = 16
-__device__ void gemm_256_64x64_16-re(int M, int N, int K, float *A, float *B, float *C, float *sh){
-	
-	//__shared__ float sh_A[2048];
-	//__shared__ float sh_B[2048];
-	
-    float *sh_A = sh;
-	float *sh_B = sh + 2048;
-
-	float4 reg_C0, reg_C1, reg_C2, reg_C3;
-	float4 reg_A0, reg_A1;
-	float  reg_B0, reg_B1;
-	
-	int m8 = M<<3;
-	int im8 = threadIdx.x&7;
-	int id8 = threadIdx.x>>3;
-	int im16 = threadIdx.x&15;
-	int id16 = threadIdx.x>>4;
-	int im64 = threadIdx.x&63;
-	int id64 = threadIdx.x>>6;
-	
-	// Compute block's starting coordinate
-	int block_base_x = blockIdx.y<<6;
-	int block_base_y = blockIdx.x<<6;
-
-	//Load C from global memory to register file
-	float4 *C_start = (float4*) (C + block_base_x*M + block_base_y + (im8<<2) + (id8)*M);
-    reg_C0 = *C_start;
-	reg_C1 = *(C_start + 8);
-	reg_C2 = *(C_start + m8);
-	reg_C3 = *(C_start + 8 + m8);
-	
-	//load A from global memory to shared memory
-	float4 *A_start = (float4*) (A + block_base_y + (im16<<2) + (id16)*M); 
-	*((float4*) (sh_A + 4*threadIdx.x)) = *(A_start);
-
-	//load B from global memory to shared memory
-	float2 *B_start = (float2*) (B + K*block_base_x + (id64)*2 + (im64)*K); 
-	*((float2*) (sh_B + 2*threadIdx.x)) = *(B_start);
-	*((float2*) (sh_B + 2*threadIdx.x + 512)) = *(B_start+4);
-	
-	int double_buffer = 0;
-#pragma unroll
-	for(int k=0; k<K; k+=16)
-	{
-		__syncthreads();
-		int A_offset = double_buffer + (im8<<2);
-		int B_offset = double_buffer + (id8<<1);
-
-#pragma unroll
-		for (int i=0; i<16; ++i)
-		{
-			reg_A0 = *((float4*) (sh_A + A_offset)); 
-			reg_A1 = *((float4*) (sh_A + A_offset + 32)); 
-			reg_B0 = sh_B[B_offset];
-			reg_B1 = sh_B[B_offset + 64];
-
-			reg_C0.x = fma(reg_A0.x, reg_B0, reg_C0.x);
-			reg_C0.y = fma(reg_A0.y, reg_B0, reg_C0.y);
-			reg_C0.z = fma(reg_A0.z, reg_B0, reg_C0.z);
-			reg_C0.w = fma(reg_A0.w, reg_B0, reg_C0.w);
-
-			reg_C1.x = fma(reg_A1.x, reg_B0, reg_C1.x);
-			reg_C1.y = fma(reg_A1.y, reg_B0, reg_C1.y);
-			reg_C1.z = fma(reg_A1.z, reg_B0, reg_C1.z);
-			reg_C1.w = fma(reg_A1.w, reg_B0, reg_C1.w);
-
-			reg_C2.x = fma(reg_A0.x, reg_B1, reg_C2.x);
-			reg_C2.y = fma(reg_A0.y, reg_B1, reg_C2.y);
-			reg_C2.z = fma(reg_A0.z, reg_B1, reg_C2.z);
-			reg_C2.w = fma(reg_A0.w, reg_B1, reg_C2.w);
-
-			reg_C3.x = fma(reg_A1.x, reg_B1, reg_C3.x);
-			reg_C3.y = fma(reg_A1.y, reg_B1, reg_C3.y);
-			reg_C3.z = fma(reg_A1.z, reg_B1, reg_C3.z);
-			reg_C3.w = fma(reg_A1.w, reg_B1, reg_C3.w);
-			
-			A_offset += 64;
-			B_offset += 1 + (i&1)*126;
-			//if (i%2) B_offset += 126;
-		}
-
-		double_buffer ^= 1024;
-
-		if (k+16 < K)
-		{
-			A_start += M<<2; 
-			*((float4*) (sh_A + double_buffer + 4*threadIdx.x)) = *(A_start);
-			
-			B_start += 8; 
-			*((float2*) (sh_B + double_buffer + 2*threadIdx.x)) = *(B_start);
-			*((float2*) (sh_B + double_buffer + 2*threadIdx.x + 512)) = *(B_start+4);
-		}
-	}
-	
-	*(C_start) = reg_C0;
-	*(C_start + 8) = reg_C1;
-	*(C_start + m8) = reg_C2;
-	*(C_start + 8 + m8) = reg_C3;
-}
 
 // 256 threads, 128x64 tile, k = 8
 __device__ void gemm_256_128x64(int M, int N, int K, float *A, float *B, float *C, float *sh){
@@ -798,24 +688,24 @@ __device__ void gemm_256_128x64_16(int M, int N, int K, float *A, float *B, floa
 	
 	//Load C from global memory to register file
 	float4 *C_start = (float4*) (C + block_base_x*M + block_base_y + (im16<<2) + (id16<<2)*M);
-        float4 *C_start2 = C_start;
-        reg_C[0] = *C_start;
+
+    reg_C[0] = *C_start;
 	reg_C[1] = *(C_start + md4);
 	reg_C[2] = *(C_start + md2);
 	reg_C[3] = *(C_start + 3*md4);
 
-	C_start2 += 16;
-	reg_C[4] = *(C_start2);
-	reg_C[5] = *(C_start2 + md4);
-	reg_C[6] = *(C_start2 + md2);
-	reg_C[7] = *(C_start2 + 3*md4);
+	C_start += 16;
+	reg_C[4] = *(C_start);
+	reg_C[5] = *(C_start + md4);
+	reg_C[6] = *(C_start + md2);
+	reg_C[7] = *(C_start + 3*md4);
 
 	//load A from global memory to shared memory
 	float4 *A_start = (float4*) (A + block_base_y + (im16<<3) + (id16)*M); 
 	*((float4*) (sh_A + 8*threadIdx.x)) = *(A_start);
 	*((float4*) (sh_A + 8*threadIdx.x + 4)) = *(A_start+1);
 
-	//load B from global memory to shared memory
+	//load A from global memory to shared memory
 	float2 *B_start = (float2*) (B + K*block_base_x + (id64<<2) + (im64)*K); 
 	*((float2*) (sh_B + (id64<<8) + 2*im64)) = *(B_start);
 	*((float2*) (sh_B + (id64<<8) + 2*im64 + 128)) = *(B_start+1);
@@ -894,18 +784,17 @@ __device__ void gemm_256_128x64_16(int M, int N, int K, float *A, float *B, floa
 		}
 	}
 	
-	
-	//C_start -= 16;
+	C_start -= 16;
     *C_start = reg_C[0];
 	*(C_start + md4) = reg_C[1];
 	*(C_start + md2) = reg_C[2];
 	*(C_start + md2 + md4) = reg_C[3];
 
-	//C_start2 += 16;
-	*(C_start2) = reg_C[4];
-	*(C_start2 + md4) = reg_C[5];
-	*(C_start2 + md2) = reg_C[6];
-	*(C_start2 + md2 + md4) = reg_C[7];
+	C_start += 16;
+	*(C_start) = reg_C[4];
+	*(C_start + md4) = reg_C[5];
+	*(C_start + md2) = reg_C[6];
+	*(C_start + md2 + md4) = reg_C[7];
 }
 
 // 256 threads, 64x128 tile, k = 8
@@ -1054,26 +943,26 @@ __device__ void gemm_256_64x128_16(int M, int N, int K, float *A, float *B, floa
 
 	//Load C from global memory to register file
 	float4 *C_start = (float4*) (C + block_base_x*M + block_base_y + (im8<<2) + (id8<<2)*M);
-float4 *C_start2 = C_start;
+
     reg_C[0] = *C_start;
 	reg_C[1] = *(C_start + md4);
 	reg_C[2] = *(C_start + md2);
 	reg_C[3] = *(C_start + 3*md4);
 
-	C_start2 += 8;
-	reg_C[4] = *(C_start2);
-	reg_C[5] = *(C_start2 + md4);
-	reg_C[6] = *(C_start2 + md2);
-	reg_C[7] = *(C_start2 + 3*md4);
+	C_start += 8;
+	reg_C[4] = *(C_start);
+	reg_C[5] = *(C_start + md4);
+	reg_C[6] = *(C_start + md2);
+	reg_C[7] = *(C_start + 3*md4);
 
 	//load A from global memory to shared memory
 	float4 *A_start = (float4*) (A + block_base_y + (im16<<2) + (id16)*M); 
 	*((float4*) (sh_A + 4*threadIdx.x)) = *(A_start);
 
-	//load B from global memory to shared memory
-	float4 *B_start = (float4*) (B + K*block_base_x + (id128<<2) + (im128)*K); 
-	*((float4*) (sh_B + 4*threadIdx.x)) = *(B_start);
-	*((float4*) (sh_B + 4*threadIdx.x + 128*8)) = *(B_start+2);
+	//load A from global memory to shared memory
+	float4 *B_start = (float4*) (B + K*block_base_x + (id128<<3) + (im128)*K); 
+	*((float4*) (sh_B + 8*threadIdx.x)) = *(B_start);
+	*((float4*) (sh_B + 8*threadIdx.x + 4)) = *(B_start+1);
 		
 	int double_buffer_A = 0;
 	int double_buffer_B = 0;
@@ -1091,9 +980,9 @@ float4 *C_start2 = C_start;
 			reg_A[1] = *((float4*) (sh_A+A_offset+32));
 
 			reg_B[0] = sh_B[B_offset];
-			reg_B[1] = sh_B[B_offset+4];
-			reg_B[2] = sh_B[B_offset+8];
-			reg_B[3] = sh_B[B_offset+12];
+			reg_B[1] = sh_B[B_offset+8];
+			reg_B[2] = sh_B[B_offset+16];
+			reg_B[3] = sh_B[B_offset+24];
 
 			reg_C[0].x = fma(reg_A[0].x, reg_B[0], reg_C[0].x);
 			reg_C[1].x = fma(reg_A[0].x, reg_B[1], reg_C[1].x);
@@ -1132,7 +1021,7 @@ float4 *C_start2 = C_start;
 			reg_C[7].w = fma(reg_A[1].w, reg_B[3], reg_C[7].w);
 
 			A_offset += 64;
-			B_offset += (1 + ((i%4)==3)*508);
+			B_offset += (1 + (i==7)*1016);
 		}
 
 		double_buffer_A ^= 1024;
@@ -1143,22 +1032,21 @@ float4 *C_start2 = C_start;
 			*((float4*) (sh_A + double_buffer_A + 4*threadIdx.x)) = *(A_start);
 
 			B_start += 4; 
-			*((float4*) (sh_B + double_buffer_B + 4*threadIdx.x)) = *(B_start);
-			*((float4*) (sh_B + double_buffer_B + 4*threadIdx.x + 128*8)) = *(B_start+2);
+			*((float4*) (sh_B + double_buffer_B + 8*threadIdx.x)) = *(B_start);
+			*((float4*) (sh_B + double_buffer_B + 8*threadIdx.x + 4)) = *(B_start+1);
 		}
 	}
-
-     C_start += 8;
+	
     *C_start = reg_C[4];
 	*(C_start + md4) = reg_C[5];
 	*(C_start + md2) = reg_C[6];
 	*(C_start + 3*md4) = reg_C[7];
 
-	C_start2 -= 8;
-	*(C_start2) = reg_C[0];
-	*(C_start2 + md4) = reg_C[1];
-	*(C_start2 + md2) = reg_C[2];
-	*(C_start2 + 3*md4) = reg_C[3];
+	C_start -= 8;
+	*(C_start) = reg_C[0];
+	*(C_start + md4) = reg_C[1];
+	*(C_start + md2) = reg_C[2];
+	*(C_start + 3*md4) = reg_C[3];
 }
 
 // 256 threads, 128x128 tile, k = 8
@@ -1369,34 +1257,32 @@ __device__ void gemm_256_128x128_16(int M, int N, int K, float *A, float *B, flo
 	int im128 = threadIdx.x & 127;
 	int id128 = threadIdx.x >> 7;	
 	int th8 = threadIdx.x << 3;
-	int th4 = threadIdx.x << 2;
 	
 	//Load C from global memory to register file
 	float4 *C_start = (float4*) (C + block_base_x*M + block_base_y + (im16<<2) + (id16<<2)*M);
-	float4 *C_start2 = C_start; float4 *C_start3 = C_start; float4 *C_start4 = C_start;
-	
+
     reg_C[0] = *C_start;
 	reg_C[1] = *(C_start + md4);
 	reg_C[2] = *(C_start + md2);
 	reg_C[3] = *(C_start + 3*md4);
 
-	C_start2 += 16;
-	reg_C[4] = *(C_start2);
-	reg_C[5] = *(C_start2 + md4);
-	reg_C[6] = *(C_start2 + md2);
-	reg_C[7] = *(C_start2 + 3*md4);
+	C_start += 16;
+	reg_C[4] = *(C_start);
+	reg_C[5] = *(C_start + md4);
+	reg_C[6] = *(C_start + md2);
+	reg_C[7] = *(C_start + 3*md4);
 
-	C_start3 += (m16);
-	reg_C[8] = *(C_start3);
-	reg_C[9] = *(C_start3 + md4);
-	reg_C[10] = *(C_start3 + md2);
-	reg_C[11] = *(C_start3 + 3*md4);
+	C_start += (m16 - 16);
+	reg_C[8] = *(C_start);
+	reg_C[9] = *(C_start + md4);
+	reg_C[10] = *(C_start + md2);
+	reg_C[11] = *(C_start + 3*md4);
 
-	C_start4 += m16 + 16;
-	reg_C[12] = *(C_start4);
-	reg_C[13] = *(C_start4 + md4);
-	reg_C[14] = *(C_start4 + md2);
-	reg_C[15] = *(C_start4 + 3*md4);
+	C_start += 16;
+	reg_C[12] = *(C_start);
+	reg_C[13] = *(C_start + md4);
+	reg_C[14] = *(C_start + md2);
+	reg_C[15] = *(C_start + 3*md4);
 
 	//load A from global memory to shared memory
 	float4 *A_start = (float4*) (A + block_base_y + (im16<<3) + (id16)*M); 
@@ -1404,9 +1290,9 @@ __device__ void gemm_256_128x128_16(int M, int N, int K, float *A, float *B, flo
 	*((float4*) (sh_A + th8 + 4)) = *(A_start+1);
 
 	//load B from global memory to shared memory
-	float4 *B_start = (float4*) (B + K*block_base_x + (id128<<2) + (im128)*K); 
-	*((float4*) (sh_B + th4)) = *(B_start);
-	*((float4*) (sh_B + th4 + 1024)) = *(B_start+2);
+	float4 *B_start = (float4*) (B + K*(block_base_x + im128) + (id128<<3)); 
+	*((float4*) (sh_B + th8)) = *(B_start);
+	*((float4*) (sh_B + th8 + 4)) = *(B_start+1);
 	
 	int double_buffer = 0;
 #pragma unroll
@@ -1429,13 +1315,13 @@ __device__ void gemm_256_128x128_16(int M, int N, int K, float *A, float *B, flo
 			reg_A[7] = sh_A[A_offset+67];
 
 			reg_B[0] = sh_B[B_offset];
-			reg_B[1] = sh_B[B_offset+4];
-			reg_B[2] = sh_B[B_offset+8];
-			reg_B[3] = sh_B[B_offset+12];
-			reg_B[4] = sh_B[B_offset+256];
-			reg_B[5] = sh_B[B_offset+260];
-			reg_B[6] = sh_B[B_offset+264];
-			reg_B[7] = sh_B[B_offset+268];
+			reg_B[1] = sh_B[B_offset+8];
+			reg_B[2] = sh_B[B_offset+16];
+			reg_B[3] = sh_B[B_offset+24];
+			reg_B[4] = sh_B[B_offset+512];
+			reg_B[5] = sh_B[B_offset+516];
+			reg_B[6] = sh_B[B_offset+520];
+			reg_B[7] = sh_B[B_offset+524];
 
 			reg_C[0].x = fma(reg_A[0], reg_B[0], reg_C[0].x);
 			reg_C[1].x = fma(reg_A[0], reg_B[1], reg_C[1].x);
@@ -1506,44 +1392,46 @@ __device__ void gemm_256_128x128_16(int M, int N, int K, float *A, float *B, flo
 			reg_C[15].w = fma(reg_A[7], reg_B[7], reg_C[15].w);
 
 			A_offset += 128;
-			if (i%4==3) B_offset += 508;
+			if (i==7) B_offset += 1016;
 			B_offset += 1;
 		}
 
 		double_buffer ^= 2048;
 
 		if (k+16 < K){
-			A_start += M<<2;
-			*((float4*) (sh_A + double_buffer + th8)) = *(A_start);
-			*((float4*) (sh_A + double_buffer + th8 + 4)) = *(A_start+1);
+			long AA = (long)A_start + (M<<2);
+			int tidss = double_buffer + th8;
+			*((float4*) (sh_A + tidss)) =   *((float4*)AA); //*(A_start);
+			*((float4*) (sh_A + tidss + 4)) = *((float4*)(AA+1)); //*(A_start+1);
 
-			B_start += 4; 
-			*((float4*) (sh_B + double_buffer + th4)) = *(B_start);
-			*((float4*) (sh_B + double_buffer + th4 + 1024)) = *(B_start+2);
+			//B_start += 4;
+			long BB = (long)B_start + 4;
+			*((float4*) (sh_B + tidss)) = *((float4*)BB); //*(B_start);
+			*((float4*) (sh_B + tidss + 4)) = *((float4*)(BB+1)); //*(B_start+1);
 		}
 	}
 	
-	//C_start -= (m16 + 16);
+	C_start -= (m16 + 16);
     *C_start = reg_C[0];
 	*(C_start + md4) = reg_C[1];
 	*(C_start + md2) = reg_C[2];
 	*(C_start + 3*md4) = reg_C[3];
 
-	//C_start += 16;
-	*(C_start2) = reg_C[4];
-	*(C_start2 + md4) = reg_C[5];
-	*(C_start2 + md2) = reg_C[6];
-	*(C_start2 + 3*md4) = reg_C[7];
+	C_start += 16;
+	*(C_start) = reg_C[4];
+	*(C_start + md4) = reg_C[5];
+	*(C_start + md2) = reg_C[6];
+	*(C_start + 3*md4) = reg_C[7];
 
-	//C_start += (m16 - 16);
-	*(C_start3) = reg_C[8];
-	*(C_start3 + md4) = reg_C[9];
-	*(C_start3 + md2) = reg_C[10];
-	*(C_start3 + 3*md4) = reg_C[11];
+	C_start += (m16 - 16);
+	*(C_start) = reg_C[8];
+	*(C_start + md4) = reg_C[9];
+	*(C_start + md2) = reg_C[10];
+	*(C_start + 3*md4) = reg_C[11];
 
-	//C_start += 16;
-	*(C_start4) = reg_C[12];
-	*(C_start4 + md4) = reg_C[13];
-	*(C_start4 + md2) = reg_C[14];
-	*(C_start4 + md2 + md4) = reg_C[15];
+	C_start += 16;
+	*(C_start) = reg_C[12];
+	*(C_start + md4) = reg_C[13];
+	*(C_start + md2) = reg_C[14];
+	*(C_start + 3*md4) = reg_C[15];
 }
