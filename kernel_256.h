@@ -479,11 +479,11 @@ __device__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 	//load B from global memory to shared memory
 	//float4 *B_start = (float4*) (B + K*block_base_x + (id64<<2) + (im64)*K); 
 	//*((float4*) (sh_B + 4*threadIdx.x)) = *(B_start);
-	float2 *B_start = (float2*) (B + K*block_base_x + (id64<<2) + (im64)*K); 
+	float2 *B_start = (float2*) (B + K*block_base_x + (im8<<1) + (id8)*K); 
 	//*((float2*) (sh_B + 2*threadIdx.x)) = *(B_start);
 	//*((float2*) (sh_B + 2*threadIdx.x + 512)) = *(B_start+4);
-	*((float2*) (sh_B + (id64<<8) + 2*im64)) = *(B_start);
-	*((float2*) (sh_B + (id64<<8) + 2*im64 + 128)) = *(B_start+1);
+	*((float2*) (sh_B + 128*threadIdx.x + K*id8)) = *(B_start);
+	*((float2*) (sh_B + 128*threadIdx.x + K*id8 + K*32)) = *(B_start+(K<<4));
 	
 	int double_buffer = 0;
 #pragma unroll
@@ -539,8 +539,10 @@ __device__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 			
 			//*((float2*) (sh_B + double_buffer + 2*threadIdx.x)) = *(B_start);
 			//*((float2*) (sh_B + double_buffer + 2*threadIdx.x + 512)) = *(B_start+4);
-			*((float2*) (sh_B + double_buffer + (id64<<8) + 2*im64)) = *(B_start);
-			*((float2*) (sh_B + double_buffer + (id64<<8) + 2*im64 + 128)) = *(B_start + 1);			
+			//*((float2*) (sh_B + double_buffer + (id64<<8) + 2*im64)) = *(B_start);
+			//*((float2*) (sh_B + double_buffer + (id64<<8) + 2*im64 + 128)) = *(B_start + 1);
+			*((float2*) (sh_B + double_buffer + 128*threadIdx.x + K*id8)) = *(B_start);
+			*((float2*) (sh_B + double_buffer + 128*threadIdx.x + K*id8 + K*32)) = *(B_start+(K<<4));			
 		}
 	}
 	
