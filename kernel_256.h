@@ -568,8 +568,8 @@ __global__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 	int m8 = M<<3;
 	int im8 = threadIdx.x&7;
 	int id8 = threadIdx.x>>3;
-	int im16 = threadIdx.x&15;
-	int id16 = threadIdx.x>>4;
+	int im32 = threadIdx.x&31;
+	int id32 = threadIdx.x>>5;
 	int im64 = threadIdx.x&63;
 	int id64 = threadIdx.x>>6;
 	
@@ -585,8 +585,9 @@ __global__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 	reg_C[3] = *(C_start + 8 + m8);
 	
 	//load A from global memory to shared memory
-	float4 *A_start = (float4*) (A + block_base_y + (im16<<2) + (id16)*M); 
-	*((float4*) (sh_A + 4*threadIdx.x)) = *(A_start);
+	float2 *A_start = (float2*) (A + block_base_y + (im32<<1) + (id32)*M); 
+	*((float2*) (sh_A + 2*threadIdx.x)) = *(A_start);
+	*((float2*) (sh_A + 2*threadIdx.x + 64*8)) = *(A_start+4*M);
 
 	//load B from global memory to shared memory
 	float4 *B_start = (float4*) (B + K*block_base_x + (id64<<2) + (im64)*K); 
@@ -637,8 +638,10 @@ __global__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 
 		if (k+16 < K)
 		{
-			A_start += M<<2; 
-			*((float4*) (sh_A + double_buffer + 4*threadIdx.x)) = *(A_start);
+			A_start += M<<3; 
+			//*((float4*) (sh_A + double_buffer + 4*threadIdx.x)) = *(A_start);
+			*((float2*) (sh_A+ double_buffer + 2*threadIdx.x)) = *(A_start);
+			*((float2*) (sh_A+ double_buffer + 2*threadIdx.x + 512)) = *(A_start+(M<<2));			
 
 			B_start += 4; 
 			*((float4*) (sh_B + double_buffer + 4*threadIdx.x)) = *(B_start);
