@@ -554,7 +554,7 @@ __device__ void gemm_256_64x64_16_2(int M, int N, int K, float *A, float *B, flo
 
 
 // 256 threads, 64x64 tile, k = 16
-__global__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float *C){
+__global__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float *C, float* sh){
 
 	float *sh_A = sh;
 	float *sh_B = sh + 2048;
