@@ -590,8 +590,11 @@ __global__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 	*((float2*) (sh_A + 2*threadIdx.x + 64*8)) = *(A_start+4*M);
 
 	//load B from global memory to shared memory
-	float4 *B_start = (float4*) (B + K*block_base_x + (id64<<2) + (im64)*K); 
-	*((float4*) (sh_B + 4*threadIdx.x)) = *(B_start);
+	float *B_start =  (B + K*block_base_x + (im16) + (id16)*K); 
+	*(sh_B + threadIdx.x) = *(B_start);
+	*(sh_B + threadIdx.x+256) = *(B_start+(K<<4));
+	*(sh_B + threadIdx.x+512) = *(B_start+(K<<5));
+	*(sh_B + threadIdx.x+768) = *(B_start+(K<<5) + (K<<4));
 	
 	int double_buffer = 0;
 #pragma unroll
@@ -599,7 +602,7 @@ __global__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 	{
 		__syncthreads();
 		int A_offset = double_buffer + (im8<<2);
-		int B_offset = double_buffer + (id8<<2);
+		int B_offset = double_buffer + (id8<<4);
 
 #pragma unroll
 		for (int i=0; i<16; ++i)
@@ -607,8 +610,12 @@ __global__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 			reg_A[0] = *((float4*) (sh_A + A_offset)); 
 			reg_A[1] = *((float4*) (sh_A + A_offset + 32)); 
 			reg_B[0] = sh_B[B_offset];
-			reg_B[1] = sh_B[B_offset + 128];
-
+			reg_B[1] = sh_B[B_offset + 512];
+			
+			A_offset += 64;
+			B_offset += 1;
+			//if (((i+1)&4) == 0) B_offset += 252;
+			
 			reg_C[0].x = fma(reg_A[0].x, reg_B[0], reg_C[0].x);
 			reg_C[0].y = fma(reg_A[0].y, reg_B[0], reg_C[0].y);
 			reg_C[0].z = fma(reg_A[0].z, reg_B[0], reg_C[0].z);
@@ -628,10 +635,6 @@ __global__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 			reg_C[3].y = fma(reg_A[1].y, reg_B[1], reg_C[3].y);
 			reg_C[3].z = fma(reg_A[1].z, reg_B[1], reg_C[3].z);
 			reg_C[3].w = fma(reg_A[1].w, reg_B[1], reg_C[3].w);
-			
-			A_offset += 64;
-			B_offset += 1;
-			if (((i+1)&4) == 0) B_offset += 252;
 		}
 
 		double_buffer ^= 1024;
@@ -643,8 +646,12 @@ __global__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 			*((float2*) (sh_A+ double_buffer + 2*threadIdx.x)) = *(A_start);
 			*((float2*) (sh_A+ double_buffer + 2*threadIdx.x + 512)) = *(A_start+(M<<2));			
 
-			B_start += 4; 
-			*((float4*) (sh_B + double_buffer + 4*threadIdx.x)) = *(B_start);
+			B_start += 16; 
+			//*((float4*) (sh_B + double_buffer + 4*threadIdx.x)) = *(B_start);
+				*(sh_B + double_buffer + threadIdx.x) = *(B_start);
+			*(sh_B + double_buffer + threadIdx.x+256) = *(B_start+(K<<4));
+			*(sh_B + double_buffer + threadIdx.x+512) = *(B_start+(K<<5));
+			*(sh_B + double_buffer + threadIdx.x+768) = *(B_start+(K<<5) + (K<<4));
 		}
 	}
 	
