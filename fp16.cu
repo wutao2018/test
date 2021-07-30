@@ -2819,7 +2819,103 @@ __global__ void matrixMulGPU(  float *A, float *B, float *C, int M, int N, int K
   }
 }
 
+// 256 threads, 64x64 tile, k = 16
+__global__ void gemm_256_64x64_16_2(int M, int N, int K, float *A, float *B, float *C){
 
+	//float *sh_A = sh;
+	//float *sh_B = sh + 2048;
+	__shared__ float sh_A[2048];
+	__shared__ float sh_B[2048];	
+
+	float4 reg_C[4];
+	float4 reg_A[2];
+	float  reg_B[2];
+	
+	int m8 = M<<3;
+	int im8 = threadIdx.x&7;
+	int id8 = threadIdx.x>>3;
+	int im16 = threadIdx.x&15;
+	int id16 = threadIdx.x>>4;
+	int im64 = threadIdx.x&63;
+	int id64 = threadIdx.x>>6;
+	
+	// Compute block's starting coordinate
+	int block_base_x = blockIdx.y<<6;
+	int block_base_y = blockIdx.x<<6;
+
+	//Load C from global memory to register file
+	float4 *C_start = (float4*) (C + block_base_x*M + block_base_y + (im8<<2) + (id8)*M);
+    reg_C[0] = *C_start;
+	reg_C[1] = *(C_start + 8);
+	reg_C[2] = *(C_start + m8);
+	reg_C[3] = *(C_start + 8 + m8);
+	
+	//load A from global memory to shared memory
+	float4 *A_start = (float4*) (A + block_base_y + (im16<<2) + (id16)*M); 
+	*((float4*) (sh_A + 4*threadIdx.x)) = *(A_start);
+
+	//load B from global memory to shared memory
+	float4 *B_start = (float4*) (B + K*block_base_x + (id64<<2) + (im64)*K); 
+	*((float4*) (sh_B + 4*threadIdx.x)) = *(B_start);
+	
+	int double_buffer = 0;
+#pragma unroll
+	for(int k=0; k<K; k+=16)
+	{
+		__syncthreads();
+		int A_offset = double_buffer + (im8<<2);
+		int B_offset = double_buffer + (id8<<1);
+
+#pragma unroll
+		for (int i=0; i<16; ++i)
+		{
+			reg_A[0] = *((float4*) (sh_A + A_offset)); 
+			reg_A[1] = *((float4*) (sh_A + A_offset + 32)); 
+			reg_B[0] = sh_B[B_offset];
+			reg_B[1] = sh_B[B_offset + 128];
+
+			reg_C[0].x = fma(reg_A[0].x, reg_B[0], reg_C[0].x);
+			reg_C[0].y = fma(reg_A[0].y, reg_B[0], reg_C[0].y);
+			reg_C[0].z = fma(reg_A[0].z, reg_B[0], reg_C[0].z);
+			reg_C[0].w = fma(reg_A[0].w, reg_B[0], reg_C[0].w);
+
+			reg_C[1].x = fma(reg_A[1].x, reg_B[0], reg_C[1].x);
+			reg_C[1].y = fma(reg_A[1].y, reg_B[0], reg_C[1].y);
+			reg_C[1].z = fma(reg_A[1].z, reg_B[0], reg_C[1].z);
+			reg_C[1].w = fma(reg_A[1].w, reg_B[0], reg_C[1].w);
+
+			reg_C[2].x = fma(reg_A[0].x, reg_B[1], reg_C[2].x);
+			reg_C[2].y = fma(reg_A[0].y, reg_B[1], reg_C[2].y);
+			reg_C[2].z = fma(reg_A[0].z, reg_B[1], reg_C[2].z);
+			reg_C[2].w = fma(reg_A[0].w, reg_B[1], reg_C[2].w);
+
+			reg_C[3].x = fma(reg_A[1].x, reg_B[1], reg_C[3].x);
+			reg_C[3].y = fma(reg_A[1].y, reg_B[1], reg_C[3].y);
+			reg_C[3].z = fma(reg_A[1].z, reg_B[1], reg_C[3].z);
+			reg_C[3].w = fma(reg_A[1].w, reg_B[1], reg_C[3].w);
+			
+			A_offset += 64;
+			B_offset += 1;
+			if (((i)&3) == 0) B_offset += 252;
+		}
+
+		double_buffer ^= 1024;
+
+		if (k+16 < K)
+		{
+			A_start += M<<2; 
+			*((float4*) (sh_A + double_buffer + 4*threadIdx.x)) = *(A_start);
+
+			B_start += 4; 
+			*((float4*) (sh_B + double_buffer + 4*threadIdx.x)) = *(B_start);
+		}
+	}
+	
+	*(C_start) = reg_C[0];
+	*(C_start + 8) = reg_C[1];
+	*(C_start + m8) = reg_C[2];
+	*(C_start + 8 + m8) = reg_C[3];
+}
 
 int main(int argc, char* argv[]) 
 {
@@ -2902,7 +2998,7 @@ int main(int argc, char* argv[])
    
    dim3 gridDim2;
    dim3 blockDim2;
-   gridDim2.x = MATRIX_M/128; gridDim2.y = MATRIX_N/64;  gridDim2.z = 1;
+   gridDim2.x = MATRIX_M/64; gridDim2.y = MATRIX_N/64;  gridDim2.z = 1;
    blockDim2.x = 256; blockDim2.y = 1; blockDim2.z = 1; 
 
    gridDim.x = (MATRIX_M + (WMMA_M * blockDim.x / 32 - 1)) / (WMMA_M * blockDim.x / 32);
@@ -2932,7 +3028,7 @@ int main(int argc, char* argv[])
    //gemm_64_16x16_3_tensor<<< gridDim3, blockDim3 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
    // gemm_256_32x32 <<< gridDim2, blockDim2 >>> (MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
    // verify
-   //gemm_256_64x64_16<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
+    gemm_256_64x64_16_2<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
    //gemm_256_64x64_16<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
    //gemm_256_128x128_16<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
    //gemm_256_64x128_16<<< gridDim2, blockDim2 >>>(MATRIX_M, MATRIX_N, MATRIX_K, a_fp32, b_fp32, c_wmma);
