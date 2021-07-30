@@ -477,8 +477,11 @@ __device__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 	*((float4*) (sh_A + 4*threadIdx.x)) = *(A_start);
 
 	//load B from global memory to shared memory
-	float4 *B_start = (float4*) (B + K*block_base_x + (id64<<2) + (im64)*K); 
-	*((float4*) (sh_B + 4*threadIdx.x)) = *(B_start);
+	//float4 *B_start = (float4*) (B + K*block_base_x + (id64<<2) + (im64)*K); 
+	//*((float4*) (sh_B + 4*threadIdx.x)) = *(B_start);
+	float2 *B_start = (float2*) (B + K*block_base_x + (id64<<1) + (im64)*K); 
+	*((float2*) (sh_B + 2*threadIdx.x)) = *(B_start);
+	*((float2*) (sh_B + 2*threadIdx.x + 512)) = *(B_start+4);	
 	
 	int double_buffer = 0;
 #pragma unroll
@@ -494,7 +497,7 @@ __device__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 			reg_A[0] = *((float4*) (sh_A + A_offset)); 
 			reg_A[1] = *((float4*) (sh_A + A_offset + 32)); 
 			reg_B[0] = sh_B[B_offset];
-			reg_B[1] = sh_B[B_offset + 128];
+			reg_B[1] = sh_B[B_offset + 64];
 
 			reg_C[0].x = fma(reg_A[0].x, reg_B[0], reg_C[0].x);
 			reg_C[0].y = fma(reg_A[0].y, reg_B[0], reg_C[0].y);
@@ -517,8 +520,8 @@ __device__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 			reg_C[3].w = fma(reg_A[1].w, reg_B[1], reg_C[3].w);
 			
 			A_offset += 64;
-			B_offset += 1;
-			if (((i+1)&3) == 0) B_offset += 252;
+			B_offset += 1 + (i&1)*126;
+			//if (((i+1)&3) == 0) B_offset += 252;
 		}
 
 		double_buffer ^= 1024;
@@ -528,8 +531,11 @@ __device__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 			A_start += M<<2; 
 			*((float4*) (sh_A + double_buffer + 4*threadIdx.x)) = *(A_start);
 
-			B_start += 4; 
-			*((float4*) (sh_B + double_buffer + 4*threadIdx.x)) = *(B_start);
+			B_start += 8;  // 4 
+			//*((float4*) (sh_B + double_buffer + 4*threadIdx.x)) = *(B_start);
+			
+			*((float2*) (sh_B + double_buffer + 2*threadIdx.x)) = *(B_start);
+			*((float2*) (sh_B + double_buffer + 2*threadIdx.x + 512)) = *(B_start+4);
 		}
 	}
 	
