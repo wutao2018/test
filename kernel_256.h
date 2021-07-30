@@ -473,7 +473,7 @@ __device__ void gemm_256_64x64_16(int M, int N, int K, float *A, float *B, float
 	reg_C[3] = *(C_start + 8 + m8);
 	
 	//load A from global memory to shared memory
-	float4 *A_start = (float4*) ((long)A + block_base_y + (im16<<2) + (id16)*M); 
+	float4 *A_start = (float4*) (A + block_base_y + (im16<<2) + (id16)*M); 
 	*((float4*) (sh_A + 4*threadIdx.x)) = *(A_start);
 
 	//load B from global memory to shared memory
