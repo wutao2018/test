@@ -135,8 +135,6 @@ int  main (int argc, char** argv) {
 	printf("\n");
 */
 
-	
-
 	int *dev_T;
 	ErrChk(cudaMalloc((void**)&dev_T, BATCH*sizeof(int)));
 	ErrChk(cudaMemcpy(dev_T, t_strategy, BATCH*sizeof(int), cudaMemcpyHostToDevice));
@@ -148,35 +146,30 @@ int  main (int argc, char** argv) {
 	block_size.z = 1;
 
     dim3 grid_size;
-	
     grid_size.x = M[0] / tile_size[t_strategy[0]][0];
     grid_size.y = N[0] / tile_size[t_strategy[0]][1];
 	grid_size.z = BATCH;
-	int max_size1 = 0;
-	int max_size2 = 0;
+	
+	int max1 = 0; int max2 = 0;
 	for (int j=1; j<BATCH; ++j){
 		grid_size.x = (grid_size.x > M[j]/tile_size[t_strategy[j]][0])? (grid_size.x):(M[j]/tile_size[t_strategy[j]][0]);
 		grid_size.y = (grid_size.y > N[j]/tile_size[t_strategy[j]][1])? (grid_size.y):(N[j]/tile_size[t_strategy[j]][1]);
 		
-		if (tile_size[t_strategy[j]][1] > max_size1) max_size1 = tile_size[t_strategy[j]][1];
-		if (tile_size[t_strategy[j]][0] > max_size2) max_size2 = tile_size[t_strategy[j]][0];
+		if (max1 < grid_size.x) max1 = grid_size.x;
+		if (max2 < grid_size.y) max2 = grid_size.y;
 	}
 
-	//printf("grid paras = %d %d %d\n", grid_size.x, grid_size.y, grid_size.z);
-	//for (int j=0; j<BATCH; j++)
-	//{
-	//	printf("matrix size = %d %d %d \n ", M[j], N[j],K[j] );
-	//}
+	max2 += max1;
 	
 	//warm-up
-	gemm<256><<<grid_size, block_size, sizeof(float)*2*(max_size1+max_size2)*16>>>(dev_M, dev_N, dev_K, dev_A, dev_B, dev_C, dev_T);
+	gemm<256><<<grid_size, block_size, sizeof(float)*2*max2*16>>>(dev_M, dev_N, dev_K, dev_A, dev_B, dev_C, dev_T);
 	KernelErrChk();
 
 	ErrChk(cudaEventCreate(&start));
 	ErrChk(cudaEventRecord(start,0));
 
 	for (int run = 0; run<N_RUNS; ++run){
-		gemm<256><<<grid_size, block_size, sizeof(float)*(max_size1+maxsize2)*32>>>(dev_M, dev_N, dev_K, dev_A, dev_B, dev_C, dev_T);
+		gemm<256><<<grid_size, block_size, sizeof(float)*max2*32>>>(dev_M, dev_N, dev_K, dev_A, dev_B, dev_C, dev_T);
 		KernelErrChk();
 	}
 
